@@ -1,12 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-  BernoulliMixtureSamplerGen,
-  BinomialSamplerGen,
+  NumberSamplerGen,
   ConfigError,
   Context,
-  GaussianSamplerGen,
-  PoissonSamplerGen,
-  UniformSamplerGen,
   type Gen,
 } from "../src/index";
 
@@ -23,38 +19,38 @@ const stddev = (xs: number[]) => {
 
 describe("number samplers", () => {
   it("hit their target statistics", () => {
-    const dice = sample(new UniformSamplerGen({ low: 1, high: 6, type: "int" }));
+    const dice = sample(new NumberSamplerGen({ type: "uniform", low: 1, high: 6, integer: true }));
     expect(new Set(dice)).toEqual(new Set([1, 2, 3, 4, 5, 6]));
     expect(mean(dice)).toBeCloseTo(3.5, 1);
 
-    const prices = sample(new UniformSamplerGen({ low: 0, high: 100, decimalPlaces: 2 }));
+    const prices = sample(new NumberSamplerGen({ type: "uniform", low: 0, high: 100, decimalPlaces: 2 }));
     expect(Math.min(...prices)).toBeGreaterThanOrEqual(0);
     expect(Math.max(...prices)).toBeLessThanOrEqual(100);
     expect(prices.every((p) => (String(p).split(".")[1] ?? "").length <= 2)).toBe(true);
 
-    const heights = sample(new GaussianSamplerGen({ mean: 170, stddev: 10 }));
+    const heights = sample(new NumberSamplerGen({ type: "gaussian", mean: 170, stddev: 10 }));
     expect(mean(heights)).toBeCloseTo(170, 0);
     expect(stddev(heights)).toBeCloseTo(10, 0);
 
     // Small means use Knuth's method, large ones PTRS. Poisson variance equals its mean.
     for (const m of [3, 250]) {
-      const events = sample(new PoissonSamplerGen({ mean: m }));
+      const events = sample(new NumberSamplerGen({ type: "poisson", mean: m }));
       expect(mean(events) / m).toBeCloseTo(1, 1);
       expect(stddev(events) ** 2 / m).toBeCloseTo(1, 1);
     }
 
-    const heads = sample(new BinomialSamplerGen({ n: 100, p: 0.3 }));
+    const heads = sample(new NumberSamplerGen({ type: "binomial", n: 100, p: 0.3 }));
     expect(mean(heads)).toBeCloseTo(30, 0);
 
     // 70% of customers spend nothing; the rest spend around 50.
     const spend = sample(
-      new BernoulliMixtureSamplerGen({ p: 0.3, gen: new GaussianSamplerGen({ mean: 50, stddev: 5 }) }),
+      new NumberSamplerGen({ type: "bernoulli_mixture", p: 0.3, gen: new NumberSamplerGen({ type: "gaussian", mean: 50, stddev: 5 }) }),
     );
     expect(spend.filter((s) => s === 0).length / spend.length).toBeCloseTo(0.7, 1);
 
     // Bad params fail at construction, naming the Gen.
-    expect(() => new GaussianSamplerGen({ id: "height", mean: 170, stddev: -1 })).toThrow(
-      new ConfigError("GaussianSamplerGen 'height': stddev must be finite and >= 0, got -1."),
+    expect(() => new NumberSamplerGen({ type: "gaussian", id: "height", mean: 170, stddev: -1 })).toThrow(
+      new ConfigError("NumberSamplerGen 'height' (gaussian): stddev must be finite and >= 0, got -1."),
     );
   });
 });

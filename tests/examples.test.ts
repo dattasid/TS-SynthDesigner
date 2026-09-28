@@ -3,19 +3,17 @@ import { expect, it } from "vitest";
 import {
   CategorySamplerGen,
   Context,
-  GaussianSamplerGen,
+  NumberSamplerGen,
   preview,
   refs,
   SubCategorySamplerGen,
   TreeGen,
-  UniformSamplerGen,
 } from "../src/index";
 
-type Country = "Canada" | "France" | "Japan";// @AI remove this type. People might want to switch rapidly from hand written lists to data source of country names, city names etc. We dont want to hold them back with too much typing. But if we are checking something using this and other examples will be contrived, keep and add a note.
-
+// Plain strings: the values can come from a hand-written list today and a data file tomorrow.
 interface Person {
   name: string;
-  country: Country;
+  country: string;
   city: string;
   age: number;
   heightCm: number;
@@ -28,7 +26,7 @@ it("a typed Person tree", () => {
     id: "Person",
     fields: {
       name: new CategorySamplerGen({ values: ["John Smith", "Jane Doe"] }),
-      country: new CategorySamplerGen<Country>({ values: { Canada: 2, France: 1, Japan: 1 } }),
+      country: new CategorySamplerGen({ values: { Canada: 2, France: 1, Japan: 1 } }),
       city: new SubCategorySamplerGen({
         parent: refOfPerson("country"),
         values: {
@@ -37,8 +35,8 @@ it("a typed Person tree", () => {
           Japan: ["Tokyo", "Osaka"],
         },
       }),
-      age: new UniformSamplerGen({ low: 18, high: 90, type: "int" }),
-      heightCm: new GaussianSamplerGen({ mean: 170, stddev: 10, decimalPlaces: 1 }),
+      age: new NumberSamplerGen({ type: "uniform", low: 18, high: 90, integer: true }),
+      heightCm: new NumberSamplerGen({ type: "gaussian", mean: 170, stddev: 10, decimalPlaces: 1 }),
     },
   });
 
@@ -49,12 +47,13 @@ it("a typed Person tree", () => {
 
 it("a Gen on its own", () => {
   const ctx = Context.create({ seed: 1 });
-  const dice = new UniformSamplerGen({ low: 1, high: 6, type: "int" }); // @AI I was thinking the numerical ones are very similar, to roll them into one with type: "uniform" | "poisson" etc
+  const dice = new NumberSamplerGen({ type: "uniform", low: 1, high: 6, integer: true });
   console.log([1, 2, 3, 4, 5].map(() => dice.generate({}, ctx)));
 });
 
-// Mistakes the compiler catches. `npm test` runs tsc first, and each @ts-expect-error
-// fails the build if its error goes away. Never called.
+// Mistakes the compiler catches. This function is never called, so it does nothing at runtime.
+// `npm test` runs tsc first: each line below must be a compile error, and if one stops being
+// an error, the @ts-expect-error above it is "unused" and tsc fails the build.
 export function compileErrors(): void {
   const ref = refs<Person>();
 
@@ -62,9 +61,10 @@ export function compileErrors(): void {
   ref("nmae");
 
   const name = new CategorySamplerGen({ values: ["John Smith"] });
-  const country = new CategorySamplerGen<Country>({ values: ["Canada"] });
+  const country = new CategorySamplerGen({ values: ["Canada"] });
   const city = new CategorySamplerGen({ values: ["Toronto"] });
-  const age = new UniformSamplerGen({ low: 18, high: 90, type: "int" });
+  const age = new NumberSamplerGen({ type: "uniform", low: 18, high: 90, integer: true });
+  const heightCm = new NumberSamplerGen({ type: "gaussian", mean: 170, stddev: 10 });
 
   new TreeGen<Person>({
     // @ts-expect-error heightCm has no Gen.
@@ -73,19 +73,29 @@ export function compileErrors(): void {
 
   new TreeGen<Person>({
     fields: {
-      name, // @AI lets also try Number type gen for name, should be error
+      // @ts-expect-error name is a string, but a number Gen produces numbers.
+      name: new NumberSamplerGen({ type: "uniform", low: 0, high: 1 }),
       country,
       city,
       // @ts-expect-error age is a number, but a category Gen produces strings.
       age: new CategorySamplerGen({ values: ["young", "old"] }),
-      heightCm: new GaussianSamplerGen({ mean: 170, stddev: 10 }),
+      heightCm,
     },
   });
 
+  // @ts-expect-error each number type has its own params: gaussian needs stddev, not high.
+  new NumberSamplerGen({ type: "gaussian", mean: 170, high: 200 });
+
+  // Opt-in: when a field is a union of literals instead of `string`, subcategory maps are checked
+  // for completeness. Contrived here; with plain `string` (as in Person) a missing parent value is
+  // reported at generation time instead.
+  interface Shirt {
+    size: "S" | "M" | "L";
+    color: string;
+  }
   new SubCategorySamplerGen({
-    parent: ref("country"),
-    // @ts-expect-error Japan is missing.
-    values: { Canada: ["Toronto"], France: ["Paris"] },
+    parent: refs<Shirt>()("size"),
+    // @ts-expect-error "L" is missing.
+    values: { S: ["red"], M: ["red", "blue"] },
   });
-  // @AI So this test is just for showing me, its no op due to the @ts-expect-error ?
 }

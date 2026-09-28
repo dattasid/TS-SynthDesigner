@@ -11,17 +11,14 @@ export {
   type SubCategorySamplerParams,
 } from "./samplers/category";
 export {
-  BernoulliMixtureSamplerGen,
-  BernoulliSamplerGen,
-  BinomialSamplerGen,
-  GaussianSamplerGen,
-  PoissonSamplerGen,
-  UniformSamplerGen,
-  type BernoulliMixtureSamplerParams,
-  type BernoulliSamplerParams,
-  type BinomialSamplerParams,
-  type GaussianSamplerParams,
-  type PoissonSamplerParams,
-  type UniformSamplerParams,
+  NumberSamplerGen,
+  type BernoulliMixtureParams,
+  type BernoulliParams,
+  type BinomialParams,
+  type GaussianParams,
+  type NumberSamplerParams,
+  type NumberSamplerType,
+  type PoissonParams,
+  type UniformParams,
 } from "./samplers/numeric";
 export { TreeGen, type Fields, type TreeGenParams } from "./tree";

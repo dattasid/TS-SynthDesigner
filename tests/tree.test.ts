@@ -1,13 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  NumberSamplerGen,
   CategorySamplerGen,
   ConfigError,
-  GaussianSamplerGen,
   preview,
   refs,
   SubCategorySamplerGen,
   TreeGen,
-  UniformSamplerGen,
 } from "../src/index";
 
 type Country = "United States" | "Canada" | "India" | "France" | "Japan";
@@ -38,8 +37,8 @@ const personFields = {
     values: { "United States": 1, Canada: 1, India: 1, France: 1, Japan: 1 },
   }),
   city: new SubCategorySamplerGen({ id: "gen_city", parent: ref("country"), values: cityMap }),
-  age: new UniformSamplerGen({ low: 0, high: 100, type: "int" }),
-  heightCm: new GaussianSamplerGen({ mean: 170, stddev: 10, decimalPlaces: 1 }),
+  age: new NumberSamplerGen({ type: "uniform", low: 0, high: 100, integer: true }),
+  heightCm: new NumberSamplerGen({ type: "gaussian", mean: 170, stddev: 10, decimalPlaces: 1 }),
 };
 
 describe("TreeGen", () => {

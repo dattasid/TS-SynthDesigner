@@ -2,164 +2,139 @@ import type { Context } from "../context";
 import { binomial, normal, poisson, roundTo } from "../distributions";
 import { BaseGen, type Gen } from "../gen";
 
-// Parameter names and meanings follow DataDesigner's sampler params (camelCased).
+// `type` and the parameter names follow DataDesigner's SamplerType values and sampler params (camelCased).
 
-export interface UniformSamplerParams {
-  id?: string;
+export interface UniformParams {
+  type: "uniform";
   /** Lower bound, inclusive. */
   low: number;
-  /** Upper bound: exclusive for "float", inclusive for "int". */
+  /** Upper bound: exclusive, or inclusive when `integer` is true. */
   high: number;
-  /** "float" (default) samples [low, high). "int" samples whole numbers in [low, high]; both must be integers. */
-  type?: "float" | "int";
-  /** Round float samples to this many decimals. */
+  /** Sample whole numbers in [low, high]. Both bounds must then be integers. */
+  integer?: boolean;
+  /** Round samples to this many decimals. */
   decimalPlaces?: number;
 }
 
-export class UniformSamplerGen extends BaseGen<number> {
-  readonly low: number;
-  readonly high: number;
-  readonly type: "float" | "int";
-  readonly decimalPlaces: number | undefined;
-
-  constructor({ id, low, high, type = "float", decimalPlaces }: UniformSamplerParams) {
-    super(id, {});
-    this.low = low;
-    this.high = high;
-    this.type = type;
-    this.decimalPlaces = decimalPlaces;
-    if (type === "int") {
-      this.check(Number.isSafeInteger(low) && Number.isSafeInteger(high), `int bounds must be integers, got [${low}, ${high}].`);
-      this.check(low <= high, `low must be <= high, got [${low}, ${high}].`);
-      this.check(decimalPlaces === undefined, "decimalPlaces does not apply to type 'int'.");
-    } else {
-      this.check(Number.isFinite(low) && Number.isFinite(high) && low < high, `need finite low < high, got [${low}, ${high}).`);
-    }
-    this.checkDecimalPlaces(decimalPlaces);
-  }
-
-  generate(_deps: {}, ctx: Context): number {
-    if (this.type === "int") return ctx.rng.int(this.low, this.high);
-    return roundTo(this.low + ctx.rng.random() * (this.high - this.low), this.decimalPlaces);
-  }
-}
-
-export interface GaussianSamplerParams {
-  id?: string;
+export interface GaussianParams {
+  type: "gaussian";
   mean: number;
   stddev: number;
   decimalPlaces?: number;
 }
 
-export class GaussianSamplerGen extends BaseGen<number> {
-  readonly mean: number;
-  readonly stddev: number;
-  readonly decimalPlaces: number | undefined;
-
-  constructor({ id, mean, stddev, decimalPlaces }: GaussianSamplerParams) {
-    super(id, {});
-    this.mean = mean;
-    this.stddev = stddev;
-    this.decimalPlaces = decimalPlaces;
-    this.check(Number.isFinite(mean), `mean must be finite, got ${mean}.`);
-    this.check(Number.isFinite(stddev) && stddev >= 0, `stddev must be finite and >= 0, got ${stddev}.`);
-    this.checkDecimalPlaces(decimalPlaces);
-  }
-
-  generate(_deps: {}, ctx: Context): number {
-    return roundTo(normal(ctx.rng, this.mean, this.stddev), this.decimalPlaces);
-  }
-}
-
-export interface PoissonSamplerParams {
-  id?: string;
+export interface PoissonParams {
+  type: "poisson";
   /** Mean number of events in a fixed interval. */
   mean: number;
 }
 
-export class PoissonSamplerGen extends BaseGen<number> {
-  readonly mean: number;
-
-  constructor({ id, mean }: PoissonSamplerParams) {
-    super(id, {});
-    this.mean = mean;
-    this.check(Number.isFinite(mean) && mean >= 0, `mean must be finite and >= 0, got ${mean}.`);
-  }
-
-  generate(_deps: {}, ctx: Context): number {
-    return poisson(ctx.rng, this.mean);
-  }
-}
-
-export interface BinomialSamplerParams {
-  id?: string;
+export interface BinomialParams {
+  type: "binomial";
   /** Number of trials. */
   n: number;
   /** Probability of success on each trial. */
   p: number;
 }
 
-export class BinomialSamplerGen extends BaseGen<number> {
-  readonly n: number;
-  readonly p: number;
-
-  constructor({ id, n, p }: BinomialSamplerParams) {
-    super(id, {});
-    this.n = n;
-    this.p = p;
-    this.check(Number.isSafeInteger(n) && n >= 0, `n must be an integer >= 0, got ${n}.`);
-    this.checkProbability(p);
-  }
-
-  generate(_deps: {}, ctx: Context): number {
-    return binomial(ctx.rng, this.n, this.p);
-  }
-}
-
-export interface BernoulliSamplerParams {
-  id?: string;
-  /** Probability of 1. */
+export interface BernoulliParams {
+  type: "bernoulli";
+  /** Probability of 1; otherwise 0. */
   p: number;
-}
-
-export class BernoulliSamplerGen extends BaseGen<0 | 1> {
-  readonly p: number;
-
-  constructor({ id, p }: BernoulliSamplerParams) {
-    super(id, {});
-    this.p = p;
-    this.checkProbability(p);
-  }
-
-  generate(_deps: {}, ctx: Context): 0 | 1 {
-    return ctx.rng.random() < this.p ? 1 : 0;
-  }
-}
-
-export interface BernoulliMixtureSamplerParams {
-  id?: string;
-  /** Probability of sampling from `gen`. Otherwise the value is 0. */
-  p: number;
-  /** The distribution sampled with probability `p`. DataDesigner takes a scipy name; here it is any number Gen without deps. */
-  gen: Gen<number>;
 }
 
 /** With probability `p` a sample of `gen`, otherwise 0. Models "zero-inflated" data such as spend or claim amounts. */
-export class BernoulliMixtureSamplerGen extends BaseGen<number> {
-  readonly p: number;
-  readonly gen: Gen<number>;
+export interface BernoulliMixtureParams {
+  type: "bernoulli_mixture";
+  p: number;
+  /** DataDesigner takes a scipy distribution name here; this takes any number Gen without deps. */
+  gen: Gen<number>;
+}
 
-  constructor({ id, p, gen }: BernoulliMixtureSamplerParams) {
-    super(id, {});
-    this.p = p;
-    this.gen = gen;
-    this.checkProbability(p);
-    this.check(Object.keys(gen.deps).length === 0, "the mixed gen must not have deps.");
+export type NumberSamplerParams = { id?: string } & (
+  | UniformParams
+  | GaussianParams
+  | PoissonParams
+  | BinomialParams
+  | BernoulliParams
+  | BernoulliMixtureParams
+);
+
+export type NumberSamplerType = NumberSamplerParams["type"];
+
+/**
+ * Samples numbers from the distribution named by `type`. Each type has its own parameters,
+ * so passing `mean` to a uniform, or forgetting `stddev` on a gaussian, is a compile error.
+ */
+export class NumberSamplerGen extends BaseGen<number> {
+  readonly params: NumberSamplerParams;
+
+  constructor(params: NumberSamplerParams) {
+    super(params.id, {});
+    this.params = params;
+    this.validate();
   }
 
   generate(_deps: {}, ctx: Context): number {
-    // Separate streams, so whether the mix fires does not shift the inner gen's samples.
-    if (ctx.child("mix").rng.random() >= this.p) return 0;
-    return this.gen.generate({}, ctx.child("value"));
+    const p = this.params;
+    switch (p.type) {
+      case "uniform":
+        if (p.integer) return ctx.rng.int(p.low, p.high);
+        return roundTo(p.low + ctx.rng.random() * (p.high - p.low), p.decimalPlaces);
+      case "gaussian":
+        return roundTo(normal(ctx.rng, p.mean, p.stddev), p.decimalPlaces);
+      case "poisson":
+        return poisson(ctx.rng, p.mean);
+      case "binomial":
+        return binomial(ctx.rng, p.n, p.p);
+      case "bernoulli":
+        return ctx.rng.random() < p.p ? 1 : 0;
+      case "bernoulli_mixture":
+        // Separate streams, so whether the mix fires does not shift the inner gen's samples.
+        if (ctx.child("mix").rng.random() >= p.p) return 0;
+        return p.gen.generate({}, ctx.child("value"));
+    }
+  }
+
+  protected override describe(): string {
+    return `${super.describe()} (${this.params.type})`;
+  }
+
+  private validate(): void {
+    const p = this.params;
+    switch (p.type) {
+      case "uniform":
+        if (p.integer) {
+          this.check(Number.isSafeInteger(p.low) && Number.isSafeInteger(p.high), `integer bounds must be integers, got [${p.low}, ${p.high}].`);
+          this.check(p.low <= p.high, `low must be <= high, got [${p.low}, ${p.high}].`);
+          this.check(p.decimalPlaces === undefined, "decimalPlaces does not apply when integer is true.");
+        } else {
+          this.check(Number.isFinite(p.low) && Number.isFinite(p.high) && p.low < p.high, `need finite low < high, got [${p.low}, ${p.high}).`);
+        }
+        this.checkDecimalPlaces(p.decimalPlaces);
+        return;
+      case "gaussian":
+        this.check(Number.isFinite(p.mean), `mean must be finite, got ${p.mean}.`);
+        this.check(Number.isFinite(p.stddev) && p.stddev >= 0, `stddev must be finite and >= 0, got ${p.stddev}.`);
+        this.checkDecimalPlaces(p.decimalPlaces);
+        return;
+      case "poisson":
+        this.check(Number.isFinite(p.mean) && p.mean >= 0, `mean must be finite and >= 0, got ${p.mean}.`);
+        return;
+      case "binomial":
+        this.check(Number.isSafeInteger(p.n) && p.n >= 0, `n must be an integer >= 0, got ${p.n}.`);
+        this.checkProbability(p.p);
+        return;
+      case "bernoulli":
+        this.checkProbability(p.p);
+        return;
+      case "bernoulli_mixture":
+        this.checkProbability(p.p);
+        this.check(Object.keys(p.gen.deps).length === 0, "the mixed gen must not have deps.");
+        return;
+      default:
+        // Reachable only from untyped JS callers.
+        this.check(false, `unknown type '${(p as { type: unknown }).type}'.`);
+    }
   }
 }
