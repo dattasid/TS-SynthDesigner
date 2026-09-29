@@ -1,6 +1,7 @@
 export { Context, type ContextParams, type ModelConfig } from "./context";
 export { ConfigError, GenerationError } from "./errors";
 export { BaseGen, BoundGen, Ref, refs, type Gen, type Refs } from "./gen";
+export { Plan } from "./plan";
 export { preview, type PreviewParams, type PreviewResults } from "./preview";
 export { MersenneTwister, type Rng } from "./rng";
 export {

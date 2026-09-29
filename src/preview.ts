@@ -1,5 +1,6 @@
 import { Context, type ModelConfig } from "./context";
 import type { Gen } from "./gen";
+import { Plan } from "./plan";
 
 export interface PreviewParams<T> {
   gen: Gen<T>;
@@ -21,7 +22,8 @@ export function preview<T>({ gen, numRecords = 10, seed, modelConfigs }: Preview
     throw new RangeError(`numRecords must be an integer >= 0, got ${numRecords}.`);
   }
   const ctx = Context.create({ seed, modelConfigs });
+  const plan = Plan.compile(gen); // once, reused for every record
   const records: T[] = [];
-  for (let i = 0; i < numRecords; i++) records.push(gen.generate({}, ctx));
+  for (let i = 0; i < numRecords; i++) records.push(plan.run(ctx));
   return { records, seed: ctx.seed };
 }

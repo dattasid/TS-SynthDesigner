@@ -1,5 +1,6 @@
 import type { Context } from "./context";
 import { BaseGen, BoundGen, type Gen, type Ref } from "./gen";
+import { Plan } from "./plan";
 
 /**
  * One Gen per key of `T`, whose output type matches that key's type.
@@ -23,21 +24,22 @@ export interface TreeCloneParams<T> {
 type AnyGen = Gen<unknown, any>;
 
 /**
- * Generates objects of type `T`, one field at a time.
+ * Describes objects of type `T`: one Gen per field. A TreeGen is itself a Gen, so it can be a field
+ * of another tree.
  *
- * Fields may be declared in any order: a field whose Gen is bound to other fields (`bind()`) is
- * generated after them. The output keeps the declaration order.
- * A TreeGen is itself a Gen, so it can be used as a field of another tree.
+ * It holds structure only. Generation is done by a `Plan`, which flattens the whole tree and orders
+ * every field after the fields it reads. Fields may be declared in any order; the output keeps the
+ * declaration order.
  */
 export class TreeGen<T extends object> extends BaseGen<T> {
   readonly fields: Fields<T>;
-  /** Field names in generation order (dependencies first). */
-  readonly order: readonly string[];
+  private plan: Plan<T> | undefined;
 
   constructor({ id, fields }: TreeGenParams<T>) {
     super(id);
     this.fields = fields;
-    this.order = this.sortFields();
+    // Early errors: unknown refs and cycles among this tree's own fields. The plan checks the whole tree again.
+    this.checkFields();
   }
 
   /**
@@ -49,27 +51,13 @@ export class TreeGen<T extends object> extends BaseGen<T> {
     return new TreeGen<T>({ id, fields: { ...this.fields, ...fields } as Fields<T> });
   }
 
+  /** Generates one object, running this tree's plan (compiled on first use, then reused). */
   generate(_inputs: {}, ctx: Context): T {
-    const fields = this.fields as Record<string, AnyGen>;
-    const values: Record<string, unknown> = {};
-    for (const name of this.order) {
-      const gen = fields[name]!;
-      const fieldCtx = ctx.child(name);
-      if (gen instanceof BoundGen) {
-        const inputs: Record<string, unknown> = {};
-        for (const [input, ref] of Object.entries(gen.refs)) inputs[input] = values[ref.path];
-        values[name] = gen.gen.generate(inputs, fieldCtx);
-      } else {
-        values[name] = gen.generate({}, fieldCtx);
-      }
-    }
-    const record: Record<string, unknown> = {};
-    for (const name of Object.keys(fields)) if (name in values) record[name] = values[name];
-    return record as T;
+    this.plan ??= Plan.compile<T>(this);
+    return this.plan.run(ctx);
   }
 
-  /** Kahn's topological sort. Ties keep declaration order, so the order is stable and readable. */
-  private sortFields(): string[] {
+  private checkFields(): void {
     const fields = this.fields as Record<string, AnyGen | undefined>;
     const names = Object.keys(fields).filter((n) => fields[n] !== undefined);
     this.check(names.length > 0, "fields must not be empty.");
@@ -92,17 +80,14 @@ export class TreeGen<T extends object> extends BaseGen<T> {
       dependsOn.set(name, targets);
     }
 
-    const order: string[] = [];
     const done = new Set<string>();
-    while (order.length < names.length) {
+    while (done.size < names.length) {
       const ready = names.find((n) => !done.has(n) && [...dependsOn.get(n)!].every((d) => done.has(d)));
       if (ready === undefined) {
         const stuck = names.filter((n) => !done.has(n));
         this.check(false, `dependency cycle among fields: ${stuck.join(", ")}.`);
       }
-      order.push(ready!);
       done.add(ready!);
     }
-    return order;
   }
 }
