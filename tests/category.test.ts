@@ -26,7 +26,7 @@ describe("category samplers", () => {
     expect(() => new CategorySamplerGen({ id: "plan", values: { free: 0, pro: 0 } })).toThrow(ConfigError);
   });
 
-  it("SubCategorySamplerGen picks a child of the parent's value", () => {
+  it("SubCategorySamplerGen picks from the list for its category's value", () => {
     type Country = "Canada" | "France";
     interface Place {
       country: Country;
@@ -37,12 +37,11 @@ describe("category samplers", () => {
       fields: {
         // `city` is declared first but depends on `country`, so `country` is generated first.
         city: new SubCategorySamplerGen({
-          parent: ref("country"),
           values: {
             Canada: ["Toronto", "Vancouver"],
             France: { Paris: 3, Lyon: 1 }, // Paris three times as likely as Lyon
           },
-        }),
+        }).bind({ category: ref("country") }),
         country: new CategorySamplerGen<Country>({ values: ["Canada", "France"] }),
       },
     });
@@ -53,7 +52,7 @@ describe("category samplers", () => {
     }
     expect(Object.keys(records[0]!)).toEqual(["city", "country"]); // declaration order is kept
 
-    // When the parent is a plain string, a value with no entry fails at generation time.
+    // When the category field is a plain string, a value with no entry fails at generation time.
     interface Loose {
       country: string;
       city: string;
@@ -62,7 +61,7 @@ describe("category samplers", () => {
     const broken = new TreeGen<Loose>({
       fields: {
         country: new CategorySamplerGen({ values: ["Canada", "Mexico"] }),
-        city: new SubCategorySamplerGen({ parent: loose("country"), values: { Canada: ["Toronto"] } }),
+        city: new SubCategorySamplerGen({ values: { Canada: ["Toronto"] } }).bind({ category: loose("country") }),
       },
     });
     expect(() => preview({ gen: broken, numRecords: 50, seed: 3 })).toThrow(GenerationError);

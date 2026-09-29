@@ -47,7 +47,7 @@ export interface BernoulliParams {
 export interface BernoulliMixtureParams {
   type: "bernoulli_mixture";
   p: number;
-  /** DataDesigner takes a scipy distribution name here; this takes any number Gen without deps. */
+  /** DataDesigner takes a scipy distribution name here; this takes any number Gen without inputs. */
   gen: Gen<number>;
 }
 
@@ -70,7 +70,7 @@ export class NumberSamplerGen extends BaseGen<number> {
   readonly params: NumberSamplerParams;
 
   constructor(params: NumberSamplerParams) {
-    super(params.id, {});
+    super(params.id);
     this.params = params;
     this.validate();
   }
@@ -130,7 +130,6 @@ export class NumberSamplerGen extends BaseGen<number> {
         return;
       case "bernoulli_mixture":
         this.checkProbability(p.p);
-        this.check(Object.keys(p.gen.deps).length === 0, "the mixed gen must not have deps.");
         return;
       default:
         // Reachable only from untyped JS callers.

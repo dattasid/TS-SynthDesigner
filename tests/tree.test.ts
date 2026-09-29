@@ -30,13 +30,16 @@ const cityMap: Record<Country, Record<string, number>> = {
 
 const ref = refs<Person>();
 
+// One Gen, reusable: which field feeds its `category` input is decided where it is bound.
+const cityGen = new SubCategorySamplerGen({ id: "gen_city", values: cityMap });
+
 const personFields = {
   name: new CategorySamplerGen({ id: "gen_names", values: { "John Smith": 1, "Jane Doe": 1 } }),
   country: new CategorySamplerGen<Country>({
     id: "gen_country",
     values: { "United States": 1, Canada: 1, India: 1, France: 1, Japan: 1 },
   }),
-  city: new SubCategorySamplerGen({ id: "gen_city", parent: ref("country"), values: cityMap }),
+  city: cityGen.bind({ category: ref("country") }),
   age: new NumberSamplerGen({ type: "uniform", low: 0, high: 100, integer: true }),
   heightCm: new NumberSamplerGen({ type: "gaussian", mean: 170, stddev: 10, decimalPlaces: 1 }),
 };
@@ -70,19 +73,38 @@ describe("TreeGen", () => {
     expect(b.map(({ email: _email, ...rest }) => rest)).toEqual(a);
   });
 
+  it("clone replaces some Gens; optional fields may be left out", () => {
+    const adults = new TreeGen<Person>({ id: "Person", fields: personFields });
+    const kids = adults.clone({
+      id: "Kid",
+      fields: { age: new NumberSamplerGen({ type: "uniform", low: 0, high: 12, integer: true }) },
+    });
+    const records = preview({ gen: kids, numRecords: 50, seed: 4 }).records;
+    expect(records.every((r) => r.age <= 12)).toBe(true);
+    expect(adults.fields.age).toBe(personFields.age); // the original is unchanged
+
+    interface Pet {
+      name: string;
+      nickname?: string;
+    }
+    const pet = new TreeGen<Pet>({ fields: { name: new CategorySamplerGen({ values: ["Rex", "Tom"] }) } });
+    expect(Object.keys(preview({ gen: pet, numRecords: 1, seed: 1 }).records[0]!)).toEqual(["name"]);
+  });
+
   it("reports bad dependencies when the tree is built, and bad types when it is compiled", () => {
     interface Loop {
       a: string;
       b: string;
     }
     const loop = refs<Loop>();
+    const echo = new SubCategorySamplerGen({ values: { x: ["x"] } as Record<string, string[]> });
     expect(
       () =>
         new TreeGen<Loop>({
           id: "Loop",
           fields: {
-            a: new SubCategorySamplerGen({ parent: loop("b"), values: { x: ["x"] } }),
-            b: new SubCategorySamplerGen({ parent: loop("a"), values: { x: ["x"] } }),
+            a: echo.bind({ category: loop("b") }),
+            b: echo.bind({ category: loop("a") }),
           },
         }),
     ).toThrow(new ConfigError("TreeGen 'Loop': dependency cycle among fields: a, b."));
@@ -91,8 +113,8 @@ describe("TreeGen", () => {
     expect(
       () =>
         new TreeGen<{ city: string }>({
-          fields: { city: new SubCategorySamplerGen({ parent: ref("country"), values: cityMap }) },
+          fields: { city: cityGen.bind({ category: ref("country") }) },
         }),
-    ).toThrow(/depends on 'country' \(via 'parent'\), which is not a field of this tree/);
+    ).toThrow(/reads 'country' \(input 'category'\), which is not a field of this tree/);
   });
 });

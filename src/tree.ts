@@ -1,23 +1,32 @@
 import type { Context } from "./context";
-import { ConfigError } from "./errors";
-import { BaseGen, type Gen } from "./gen";
+import { BaseGen, BoundGen, type Gen, type Ref } from "./gen";
 
 /**
  * One Gen per key of `T`, whose output type matches that key's type.
- * A missing key, an extra key, or a Gen of the wrong type is a compile error.
+ * A missing required key, an extra key, a Gen of the wrong type, or a Gen whose inputs are not
+ * bound is a compile error. Optional keys of `T` (`middleName?: string`) may be left out.
  */
-export type Fields<T> = { [K in keyof T]-?: Gen<T[K], any> };
+export type Fields<T> = { [K in keyof T]: Gen<T[K]> };
 
 export interface TreeGenParams<T> {
   id?: string;
   fields: Fields<T>;
 }
 
+export interface TreeCloneParams<T> {
+  /** Defaults to the original's id. */
+  id?: string;
+  /** Gens to replace. Every other field keeps the original's Gen. */
+  fields?: Partial<Fields<T>>;
+}
+
+type AnyGen = Gen<unknown, any>;
+
 /**
  * Generates objects of type `T`, one field at a time.
  *
- * Fields may be declared in any order: each field's deps come from the refs its Gen holds, and fields
- * are generated after the fields they depend on. The output keeps the declaration order.
+ * Fields may be declared in any order: a field whose Gen is bound to other fields (`bind()`) is
+ * generated after them. The output keeps the declaration order.
  * A TreeGen is itself a Gen, so it can be used as a field of another tree.
  */
 export class TreeGen<T extends object> extends BaseGen<T> {
@@ -26,43 +35,58 @@ export class TreeGen<T extends object> extends BaseGen<T> {
   readonly order: readonly string[];
 
   constructor({ id, fields }: TreeGenParams<T>) {
-    super(id, {});
+    super(id);
     this.fields = fields;
     this.order = this.sortFields();
   }
 
-  generate(_deps: {}, ctx: Context): T {
-    const fields = this.fields as Record<string, Gen<unknown, Record<string, unknown>>>;
+  /**
+   * A copy of this tree with some Gens replaced. Since it starts from a complete tree, it stays complete.
+   *
+   *     const kids = person.clone({ fields: { age: kidAgeGen } });
+   */
+  clone({ id = this.id, fields = {} }: TreeCloneParams<T> = {}): TreeGen<T> {
+    return new TreeGen<T>({ id, fields: { ...this.fields, ...fields } as Fields<T> });
+  }
+
+  generate(_inputs: {}, ctx: Context): T {
+    const fields = this.fields as Record<string, AnyGen>;
     const values: Record<string, unknown> = {};
     for (const name of this.order) {
       const gen = fields[name]!;
-      const depValues: Record<string, unknown> = {};
-      for (const [depName, ref] of Object.entries(gen.deps)) depValues[depName] = values[ref.path];
-      values[name] = gen.generate(depValues, ctx.child(name));
+      const fieldCtx = ctx.child(name);
+      if (gen instanceof BoundGen) {
+        const inputs: Record<string, unknown> = {};
+        for (const [input, ref] of Object.entries(gen.refs)) inputs[input] = values[ref.path];
+        values[name] = gen.gen.generate(inputs, fieldCtx);
+      } else {
+        values[name] = gen.generate({}, fieldCtx);
+      }
     }
     const record: Record<string, unknown> = {};
-    for (const name of Object.keys(fields)) record[name] = values[name];
+    for (const name of Object.keys(fields)) if (name in values) record[name] = values[name];
     return record as T;
   }
 
   /** Kahn's topological sort. Ties keep declaration order, so the order is stable and readable. */
   private sortFields(): string[] {
-    const fields = this.fields as Record<string, Gen<unknown, Record<string, unknown>>>;
-    const names = Object.keys(fields);
+    const fields = this.fields as Record<string, AnyGen | undefined>;
+    const names = Object.keys(fields).filter((n) => fields[n] !== undefined);
     this.check(names.length > 0, "fields must not be empty.");
 
     const dependsOn = new Map<string, Set<string>>();
     for (const name of names) {
       const gen = fields[name];
-      this.check(gen !== undefined && typeof gen.generate === "function", `field '${name}' is not a Gen.`);
+      this.check(typeof gen?.generate === "function", `field '${name}' is not a Gen.`);
+      const refs: Readonly<Record<string, Ref<unknown>>> = gen instanceof BoundGen ? gen.refs : {};
       const targets = new Set<string>();
-      for (const [depName, ref] of Object.entries(gen!.deps)) {
+      for (const [input, ref] of Object.entries(refs)) {
         this.check(
-          Object.hasOwn(fields, ref.path),
-          `field '${name}' depends on '${ref.path}' (via '${depName}'), which is not a field of this tree. ` +
+          names.includes(ref.path),
+          `field '${name}' reads '${ref.path}' (input '${input}'), which is not a field of this tree. ` +
             `Fields: ${names.join(", ")}.`,
         );
-        this.check(ref.path !== name, `field '${name}' depends on itself.`);
+        this.check(ref.path !== name, `field '${name}' reads itself.`);
         targets.add(ref.path);
       }
       dependsOn.set(name, targets);

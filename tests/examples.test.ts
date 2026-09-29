@@ -15,6 +15,8 @@ interface Person {
   name: string;
   country: string;
   city: string;
+  birthCountry: string;
+  birthCity: string;
   age: number;
   heightCm: number;
 }
@@ -22,19 +24,24 @@ interface Person {
 it("a typed Person tree", () => {
   const refOfPerson = refs<Person>();
 
+  const countryGen = new CategorySamplerGen({ values: { Canada: 2, France: 1, Japan: 1 } });
+  // A Gen with an input: its `category` is fed by whichever field it is bound to.
+  const cityGen = new SubCategorySamplerGen({
+    values: {
+      Canada: ["Toronto", "Vancouver"],
+      France: { Paris: 3, Lyon: 1 },
+      Japan: ["Tokyo", "Osaka"],
+    },
+  });
+
   const person = new TreeGen<Person>({
     id: "Person",
     fields: {
       name: new CategorySamplerGen({ values: ["John Smith", "Jane Doe"] }),
-      country: new CategorySamplerGen({ values: { Canada: 2, France: 1, Japan: 1 } }),
-      city: new SubCategorySamplerGen({
-        parent: refOfPerson("country"),
-        values: {
-          Canada: ["Toronto", "Vancouver"],
-          France: { Paris: 3, Lyon: 1 },
-          Japan: ["Tokyo", "Osaka"],
-        },
-      }),
+      country: countryGen,
+      city: cityGen.bind({ category: refOfPerson("country") }),
+      birthCountry: countryGen,
+      birthCity: cityGen.bind({ category: refOfPerson("birthCountry") }), // same Gen, different input
       age: new NumberSamplerGen({ type: "uniform", low: 18, high: 90, integer: true }),
       heightCm: new NumberSamplerGen({ type: "gaussian", mean: 170, stddev: 10, decimalPlaces: 1 }),
     },
@@ -43,6 +50,13 @@ it("a typed Person tree", () => {
   const { records, seed } = preview({ gen: person, numRecords: 5, seed: 2026 });
   console.table(records);
   expect(preview({ gen: person, numRecords: 5, seed }).records).toEqual(records); // same seed, same data
+
+  // A copy with some Gens replaced. It starts complete, so it stays complete.
+  const kids = person.clone({
+    id: "Kid",
+    fields: { age: new NumberSamplerGen({ type: "uniform", low: 0, high: 12, integer: true }) },
+  });
+  console.table(preview({ gen: kids, numRecords: 3, seed: 2026 }).records);
 });
 
 it("a Gen on its own", () => {
@@ -63,12 +77,14 @@ export function compileErrors(): void {
   const name = new CategorySamplerGen({ values: ["John Smith"] });
   const country = new CategorySamplerGen({ values: ["Canada"] });
   const city = new CategorySamplerGen({ values: ["Toronto"] });
+  const birthCountry = country;
+  const birthCity = city;
   const age = new NumberSamplerGen({ type: "uniform", low: 18, high: 90, integer: true });
   const heightCm = new NumberSamplerGen({ type: "gaussian", mean: 170, stddev: 10 });
 
   new TreeGen<Person>({
     // @ts-expect-error heightCm has no Gen.
-    fields: { name, country, city, age },
+    fields: { name, country, city, birthCountry, birthCity, age },
   });
 
   new TreeGen<Person>({
@@ -77,6 +93,9 @@ export function compileErrors(): void {
       name: new NumberSamplerGen({ type: "uniform", low: 0, high: 1 }),
       country,
       city,
+      birthCountry,
+      // @ts-expect-error a Gen with an unbound input (category) cannot be a field; call bind() first.
+      birthCity: new SubCategorySamplerGen({ values: { Canada: ["Toronto"] } }),
       // @ts-expect-error age is a number, but a category Gen produces strings.
       age: new CategorySamplerGen({ values: ["young", "old"] }),
       heightCm,
@@ -86,16 +105,17 @@ export function compileErrors(): void {
   // @ts-expect-error each number type has its own params: gaussian needs stddev, not high.
   new NumberSamplerGen({ type: "gaussian", mean: 170, high: 200 });
 
-  // Opt-in: when a field is a union of literals instead of `string`, subcategory maps are checked
-  // for completeness. Contrived here; with plain `string` (as in Person) a missing parent value is
-  // reported at generation time instead.
+  // @ts-expect-error bind() takes a Ref of the input's type: age is a number, category is a string.
+  new SubCategorySamplerGen({ values: { Canada: ["Toronto"] } }).bind({ category: ref("age") });
+
+  // Opt-in: when the bound field is a union of literals instead of `string`, bind() checks that the
+  // subcategory map covers every literal. Contrived here; with plain `string` (as in Person) a
+  // missing category value is reported at generation time instead.
   interface Shirt {
     size: "S" | "M" | "L";
     color: string;
   }
-  new SubCategorySamplerGen({
-    parent: refs<Shirt>()("size"),
-    // @ts-expect-error "L" is missing.
-    values: { S: ["red"], M: ["red", "blue"] },
-  });
+  const colorBySize = new SubCategorySamplerGen({ values: { S: ["red"], M: ["red", "blue"] } });
+  // @ts-expect-error "L" has no entry in values (the error names it: missingCategories: "L").
+  colorBySize.bind({ category: refs<Shirt>()("size") });
 }

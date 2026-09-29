@@ -1,7 +1,7 @@
 import type { Context } from "../context";
 import { WeightedTable } from "../distributions";
 import { GenerationError } from "../errors";
-import { BaseGen, type Ref } from "../gen";
+import { BaseGen, type BoundGen, type Ref } from "../gen";
 
 /**
  * Either a map of value to weight (`{ doctor: 2, lawyer: 1 }`), or a list of values with equal weights.
@@ -20,7 +20,7 @@ export class CategorySamplerGen<V extends string> extends BaseGen<V> {
   private readonly table: WeightedTable<V>;
 
   constructor({ id, values }: CategorySamplerParams<V>) {
-    super(id, {});
+    super(id);
     this.values = values;
     this.table = buildTable(values, (message) => this.check(false, message));
   }
@@ -30,44 +30,73 @@ export class CategorySamplerGen<V extends string> extends BaseGen<V> {
   }
 }
 
-export interface SubCategorySamplerParams<P extends string, V extends string> {
+/** For each category value, its CategoryValues: `{ Canada: ["Toronto"], France: { Paris: 3, Lyon: 1 } }`. */
+export type SubCategoryValues = Readonly<Record<string, CategoryValues<string>>>;
+
+/** The values a SubCategorySamplerGen can produce: every list item and map key in `M`. */
+export type SubCategoryOutput<M extends SubCategoryValues> = {
+  [K in keyof M]: M[K] extends readonly (infer X)[] ? X : keyof M[K];
+}[keyof M] &
+  string;
+
+export interface SubCategorySamplerParams<M extends SubCategoryValues> {
   id?: string;
-  /** The field whose value selects the list to pick from, e.g. `ref("country")`. */
-  parent: Ref<P>;
   /**
-   * For each parent value, the values to pick from. When the parent field is a union of literals
-   * (`"Canada" | "France"`), a missing or misspelled key is a compile error.
+   * For each category value, the values to pick from. When the field bound to `category` is a union
+   * of literals (`"S" | "M" | "L"`), a literal with no key here is a compile error at `bind()`; for a
+   * plain `string` field it fails at generation time.
    */
-  values: Readonly<Record<NoInfer<P>, CategoryValues<V>>>;
+  values: M;
 }
 
-/** Picks a value from the list for the parent field's value, e.g. a city within the chosen country. */
-export class SubCategorySamplerGen<P extends string, V extends string> extends BaseGen<V, { parent: P }> {
-  readonly values: Readonly<Record<P, CategoryValues<V>>>;
-  private readonly tables = new Map<string, WeightedTable<V>>();
+/**
+ * Picks a value from the list for the value of its `category` input, e.g. a city within a country.
+ * Bind the input to a field: `cityGen.bind({ category: person("country") })`.
+ */
+export class SubCategorySamplerGen<const M extends SubCategoryValues> extends BaseGen<
+  SubCategoryOutput<M>,
+  { category: string }
+> {
+  readonly values: M;
+  private readonly tables = new Map<string, WeightedTable<SubCategoryOutput<M>>>();
 
-  constructor({ id, parent, values }: SubCategorySamplerParams<P, V>) {
-    super(id, { parent });
+  constructor({ id, values }: SubCategorySamplerParams<M>) {
+    super(id);
     this.values = values;
-    const entries = Object.entries(values) as [string, CategoryValues<V>][];
-    this.check(entries.length > 0, "values must have at least one parent value.");
-    for (const [parentValue, childValues] of entries) {
-      const table = buildTable(childValues, (message) => this.check(false, `for parent value '${parentValue}': ${message}`));
-      this.tables.set(parentValue, table);
+    const entries = Object.entries(values) as [string, CategoryValues<SubCategoryOutput<M>>][];
+    this.check(entries.length > 0, "values must have at least one category value.");
+    for (const [category, childValues] of entries) {
+      const table = buildTable(childValues, (message) => this.check(false, `for category '${category}': ${message}`));
+      this.tables.set(category, table);
     }
   }
 
-  generate({ parent }: { parent: P }, ctx: Context): V {
-    const table = this.tables.get(parent);
+  /**
+   * Like `BaseGen.bind`, plus a completeness check: when the bound field is a union of literals,
+   * every literal must have an entry in `values`. The error names the missing ones.
+   */
+  override bind<F extends string>(inputs: { category: Ref<F> & CoversAll<F, keyof M & string> }): BoundGen<SubCategoryOutput<M>> {
+    return super.bind(inputs);
+  }
+
+  generate({ category }: { category: string }, ctx: Context): SubCategoryOutput<M> {
+    const table = this.tables.get(category);
     if (!table) {
       throw new GenerationError(
-        `${this.describe()} at ${ctx.pathString}: parent value '${parent}' has no entry in values. ` +
-          `Known parent values: ${[...this.tables.keys()].join(", ")}.`,
+        `${this.describe()} at ${ctx.pathString}: category '${category}' has no entry in values. ` +
+          `Known categories: ${[...this.tables.keys()].join(", ")}.`,
       );
     }
     return table.pick(ctx.rng);
   }
 }
+
+/** `unknown` (no constraint) when `F` is plain `string` or fully covered by `P`; otherwise names what is missing. */
+type CoversAll<F extends string, P extends string> = string extends F
+  ? unknown
+  : [F] extends [P]
+    ? unknown
+    : { missingCategories: Exclude<F, P> };
 
 function buildTable<V extends string>(values: CategoryValues<V>, fail: (message: string) => void): WeightedTable<V> {
   const entries: [V, number][] = Array.isArray(values)
