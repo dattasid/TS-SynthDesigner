@@ -155,14 +155,17 @@ export function compileErrors(): void {
   // @ts-expect-error bind() takes a Ref of the input's type: age is a number, category is a string.
   new SubCategorySamplerGen({ values: { Canada: ["Toronto"] } }).bind({ category: ref("age") });
 
-  // Opt-in: when the bound field is a union of literals instead of `string`, bind() checks that the
-  // subcategory map covers every literal. Contrived here; with plain `string` (as in Person) a
-  // missing category value is reported at generation time instead.
-  interface Shirt {
-    size: "S" | "M" | "L";
-    color: string;
-  }
-  const colorBySize = new SubCategorySamplerGen({ values: { S: ["red"], M: ["red", "blue"] } });
-  // @ts-expect-error "L" has no entry in values (the error names it: missingCategories: "L").
-  colorBySize.bind({ category: refs<Shirt>()("size") });
+  // Opt-in literal types: write the key type, and the map must cover it. Contrived here; with plain
+  // `string` keys (the default, as for cities above) a missing category is reported at generation time.
+  type Size = "S" | "M" | "L";
+  new SubCategorySamplerGen<Size>({
+    // @ts-expect-error Property 'L' is missing.
+    values: { S: ["red"], M: ["red", "blue"] },
+  });
+
+  // A Gen keyed by Size only accepts a Size field: a plain string field could hold anything.
+  const colorBySize = new SubCategorySamplerGen<Size>({ values: { S: ["red"], M: ["blue"], L: ["green"] } });
+  colorBySize.bind({ category: refs<{ size: Size }>()("size") }); // fine
+  // @ts-expect-error Ref<string> is not a Ref<Size>.
+  colorBySize.bind({ category: refs<{ size: string }>()("size") });
 }

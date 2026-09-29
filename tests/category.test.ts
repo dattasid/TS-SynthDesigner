@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 import {
   CategorySamplerGen,
   ConfigError,
@@ -65,5 +65,34 @@ describe("category samplers", () => {
       },
     });
     expect(() => preview({ gen: broken, numRecords: 50, seed: 3 })).toThrow(GenerationError);
+  });
+
+  it("types stay plain strings, so values can come from a file", () => {
+    // As if read from cities.json: JSON.parse gives no literal types, and none are needed.
+    const cityMap: Record<string, Record<string, number> | string[]> = JSON.parse(
+      '{ "Canada": ["Toronto", "Vancouver"], "France": { "Paris": 3, "Lyon": 1 } }',
+    );
+    const cityGen = new SubCategorySamplerGen({ values: cityMap });
+    const inline = new SubCategorySamplerGen({ values: { Canada: ["Toronto"], France: { Paris: 3 } } });
+
+    // The values never become part of the type, whether written inline or loaded.
+    expectTypeOf(cityGen).toEqualTypeOf<SubCategorySamplerGen<string, string>>();
+    expectTypeOf(inline).toEqualTypeOf<SubCategorySamplerGen<string, string>>();
+    expectTypeOf(new CategorySamplerGen({ values: ["a", "b"] })).toEqualTypeOf<CategorySamplerGen<string>>();
+
+    interface Place {
+      country: string;
+      city: string;
+    }
+    const place = new TreeGen<Place>({
+      fields: {
+        country: new CategorySamplerGen({ values: Object.keys(cityMap) }),
+        city: cityGen.bind({ category: refs<Place>()("country") }),
+      },
+    });
+    for (const { country, city } of preview({ gen: place, numRecords: 50, seed: 1 }).records) {
+      const options = cityMap[country]!;
+      expect(Array.isArray(options) ? options : Object.keys(options)).toContain(city);
+    }
   });
 });

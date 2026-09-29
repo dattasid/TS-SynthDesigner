@@ -9,9 +9,7 @@ export {
   SubCategorySamplerGen,
   type CategorySamplerParams,
   type CategoryValues,
-  type SubCategoryOutput,
   type SubCategorySamplerParams,
-  type SubCategoryValues,
 } from "./samplers/category";
 export {
   NumberSamplerGen,

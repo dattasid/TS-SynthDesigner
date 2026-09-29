@@ -1,21 +1,29 @@
 import type { Context } from "../context";
 import { WeightedTable } from "../distributions";
 import { GenerationError } from "../errors";
-import { BaseGen, type BoundGen, type Ref } from "../gen";
+import { BaseGen } from "../gen";
 
 /**
  * Either a map of value to weight (`{ doctor: 2, lawyer: 1 }`), or a list of values with equal weights.
  * Weights are relative and need not sum to 1. A weight of 0 means the value is never picked.
+ * Both forms are converted to one weight table when the Gen is constructed.
  */
-export type CategoryValues<V extends string> = Readonly<Record<V, number>> | readonly V[];
+export type CategoryValues<V extends string = string> = Readonly<Record<V, number>> | readonly V[];
 
 export interface CategorySamplerParams<V extends string> {
   id?: string;
-  values: CategoryValues<V>;
+  /** `NoInfer`: the values never set `V`. `V` is `string` unless written explicitly. */
+  values: CategoryValues<NoInfer<V>>;
 }
 
-/** Picks one of `values`, by weight. */
-export class CategorySamplerGen<V extends string> extends BaseGen<V> {
+/**
+ * Picks one of `values`, by weight. Produces `string` by default, so values can come from a
+ * hand-written list or a data file alike.
+ *
+ * Opt in to a union of literals by writing it: `new CategorySamplerGen<Country>({ ... })`. The values
+ * are then checked against it (and the map form must give every literal a weight).
+ */
+export class CategorySamplerGen<V extends string = string> extends BaseGen<V> {
   readonly values: CategoryValues<V>;
   private readonly table: WeightedTable<V>;
 
@@ -25,45 +33,41 @@ export class CategorySamplerGen<V extends string> extends BaseGen<V> {
     this.table = buildTable(values, (message) => this.check(false, message));
   }
 
-  generate(_deps: {}, ctx: Context): V {
+  generate(_inputs: {}, ctx: Context): V {
     return this.table.pick(ctx.rng);
   }
 }
 
-/** For each category value, its CategoryValues: `{ Canada: ["Toronto"], France: { Paris: 3, Lyon: 1 } }`. */
-export type SubCategoryValues = Readonly<Record<string, CategoryValues<string>>>;
-
-/** The values a SubCategorySamplerGen can produce: every list item and map key in `M`. */
-export type SubCategoryOutput<M extends SubCategoryValues> = {
-  [K in keyof M]: M[K] extends readonly (infer X)[] ? X : keyof M[K];
-}[keyof M] &
-  string;
-
-export interface SubCategorySamplerParams<M extends SubCategoryValues> {
+export interface SubCategorySamplerParams<K extends string, V extends string> {
   id?: string;
   /**
-   * For each category value, the values to pick from. When the field bound to `category` is a union
-   * of literals (`"S" | "M" | "L"`), a literal with no key here is a compile error at `bind()`; for a
-   * plain `string` field it fails at generation time.
+   * For each category value (`K`), the values to pick from (`V`):
+   * `{ Canada: ["Toronto"], France: { Paris: 3, Lyon: 1 } }`.
+   * When `K` is a union of literals, a missing or unknown key is a compile error here.
    */
-  values: M;
+  values: Readonly<Record<NoInfer<K>, CategoryValues<NoInfer<V>>>>;
 }
 
 /**
  * Picks a value from the list for the value of its `category` input, e.g. a city within a country.
  * Bind the input to a field: `cityGen.bind({ category: person("country") })`.
+ *
+ * `K` (category keys) and `V` (values) are `string` unless written explicitly:
+ * `new SubCategorySamplerGen<Size>({ ... })` makes the map cover every `Size`, and then only a field
+ * of type `Size` can be bound to `category`. With plain `string`, a category value that has no entry
+ * fails at generation time.
  */
-export class SubCategorySamplerGen<const M extends SubCategoryValues> extends BaseGen<
-  SubCategoryOutput<M>,
-  { category: string }
+export class SubCategorySamplerGen<K extends string = string, V extends string = string> extends BaseGen<
+  V,
+  { category: K }
 > {
-  readonly values: M;
-  private readonly tables = new Map<string, WeightedTable<SubCategoryOutput<M>>>();
+  readonly values: Readonly<Record<K, CategoryValues<V>>>;
+  private readonly tables = new Map<string, WeightedTable<V>>();
 
-  constructor({ id, values }: SubCategorySamplerParams<M>) {
+  constructor({ id, values }: SubCategorySamplerParams<K, V>) {
     super(id);
     this.values = values;
-    const entries = Object.entries(values) as [string, CategoryValues<SubCategoryOutput<M>>][];
+    const entries = Object.entries(values) as [string, CategoryValues<V>][];
     this.check(entries.length > 0, "values must have at least one category value.");
     for (const [category, childValues] of entries) {
       const table = buildTable(childValues, (message) => this.check(false, `for category '${category}': ${message}`));
@@ -71,15 +75,7 @@ export class SubCategorySamplerGen<const M extends SubCategoryValues> extends Ba
     }
   }
 
-  /**
-   * Like `BaseGen.bind`, plus a completeness check: when the bound field is a union of literals,
-   * every literal must have an entry in `values`. The error names the missing ones.
-   */
-  override bind<F extends string>(inputs: { category: Ref<F> & CoversAll<F, keyof M & string> }): BoundGen<SubCategoryOutput<M>> {
-    return super.bind(inputs);
-  }
-
-  generate({ category }: { category: string }, ctx: Context): SubCategoryOutput<M> {
+  generate({ category }: { category: K }, ctx: Context): V {
     const table = this.tables.get(category);
     if (!table) {
       throw new GenerationError(
@@ -90,13 +86,6 @@ export class SubCategorySamplerGen<const M extends SubCategoryValues> extends Ba
     return table.pick(ctx.rng);
   }
 }
-
-/** `unknown` (no constraint) when `F` is plain `string` or fully covered by `P`; otherwise names what is missing. */
-type CoversAll<F extends string, P extends string> = string extends F
-  ? unknown
-  : [F] extends [P]
-    ? unknown
-    : { missingCategories: Exclude<F, P> };
 
 function buildTable<V extends string>(values: CategoryValues<V>, fail: (message: string) => void): WeightedTable<V> {
   const entries: [V, number][] = Array.isArray(values)
