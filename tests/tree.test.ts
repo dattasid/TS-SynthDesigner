@@ -91,6 +91,29 @@ describe("TreeGen", () => {
     expect(Object.keys(preview({ gen: pet, numRecords: 1, seed: 1 }).records[0]!)).toEqual(["name"]);
   });
 
+  it("builder adds fields step by step; completeness is checked only against requiredKeys", () => {
+    const b = TreeGen.builder<Person>({ id: "Person", requiredKeys: ["name", "country", "city", "age", "heightCm"] });
+    for (const name of ["name", "country", "age", "heightCm"] as const) b.field({ name, gen: personFields[name] });
+    const withCity = true;
+    if (withCity) b.field({ name: "city", gen: personFields.city });
+    const built = b.build();
+
+    // Same Gens as the fields-object tree, so the same records.
+    const direct = new TreeGen<Person>({ id: "Person", fields: personFields });
+    expect(preview({ gen: built, numRecords: 5, seed: 8 }).records).toEqual(
+      preview({ gen: direct, numRecords: 5, seed: 8 }).records,
+    );
+
+    expect(() => b.field({ name: "age", gen: personFields.age })).toThrow(
+      new ConfigError("TreeBuilder 'Person': field 'age' was already added."),
+    );
+    const partial = TreeGen.builder<Person>({ id: "Person", requiredKeys: ["name", "age"] }).field({
+      name: "name",
+      gen: personFields.name,
+    });
+    expect(() => partial.build()).toThrow(new ConfigError("TreeBuilder 'Person': missing fields: age."));
+  });
+
   it("reports bad dependencies when the tree is built, and bad types when it is compiled", () => {
     interface Loop {
       a: string;

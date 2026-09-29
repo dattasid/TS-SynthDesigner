@@ -1,4 +1,5 @@
 import type { Context } from "./context";
+import { ConfigError } from "./errors";
 import { BaseGen, BoundGen, type Gen, type Ref } from "./gen";
 import { Plan } from "./plan";
 
@@ -19,6 +20,15 @@ export interface TreeCloneParams<T> {
   id?: string;
   /** Gens to replace. Every other field keeps the original's Gen. */
   fields?: Partial<Fields<T>>;
+}
+
+export interface TreeBuilderParams<T> {
+  id?: string;
+  /**
+   * Keys that must have a Gen by `build()`. Optional: types are erased at runtime, so without this
+   * list the builder cannot know which keys `T` has, and a missing field just won't appear in records.
+   */
+  requiredKeys?: readonly (keyof T & string)[];
 }
 
 type AnyGen = Gen<unknown, any>;
@@ -49,6 +59,15 @@ export class TreeGen<T extends object> extends BaseGen<T> {
    */
   clone({ id = this.id, fields = {} }: TreeCloneParams<T> = {}): TreeGen<T> {
     return new TreeGen<T>({ id, fields: { ...this.fields, ...fields } as Fields<T> });
+  }
+
+  /**
+   * A step-by-step alternative to the `fields` object, for loops, conditionals, or fields added later.
+   * Each `field()` call is still type-checked (the key must exist in `T`, the Gen must produce
+   * `T[key]`, inputs must be bound), but completeness is not checked at compile time.
+   */
+  static builder<T extends object>(params: TreeBuilderParams<T> = {}): TreeBuilder<T> {
+    return new TreeBuilder<T>(params);
   }
 
   /** Generates one object, running this tree's plan (compiled on first use, then reused). */
@@ -89,5 +108,32 @@ export class TreeGen<T extends object> extends BaseGen<T> {
       }
       done.add(ready!);
     }
+  }
+}
+
+/** Made by `TreeGen.builder()`. */
+export class TreeBuilder<T extends object> {
+  private readonly fields: Partial<Fields<T>> = {};
+
+  constructor(private readonly params: TreeBuilderParams<T>) {}
+
+  /** Adds a field. Adding the same name twice throws; use `TreeGen.clone()` to replace a Gen. */
+  field<K extends keyof T & string>({ name, gen }: { name: K; gen: Gen<T[K]> }): this {
+    if (Object.hasOwn(this.fields, name)) {
+      throw new ConfigError(`${this.describe()}: field '${name}' was already added.`);
+    }
+    this.fields[name] = gen as Fields<T>[K];
+    return this;
+  }
+
+  /** Builds the TreeGen. Refs and cycles are checked here, and `requiredKeys` if given. */
+  build(): TreeGen<T> {
+    const missing = (this.params.requiredKeys ?? []).filter((k) => !Object.hasOwn(this.fields, k));
+    if (missing.length > 0) throw new ConfigError(`${this.describe()}: missing fields: ${missing.join(", ")}.`);
+    return new TreeGen<T>({ id: this.params.id, fields: this.fields as Fields<T> });
+  }
+
+  private describe(): string {
+    return this.params.id === undefined ? "TreeBuilder" : `TreeBuilder '${this.params.id}'`;
   }
 }

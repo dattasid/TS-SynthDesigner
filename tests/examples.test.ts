@@ -21,6 +21,11 @@ interface Person {
   heightCm: number;
 }
 
+interface Pet {
+  name: string;
+  species: string;
+}
+
 it("a typed Person tree", () => {
   const refOfPerson = refs<Person>();
 
@@ -57,6 +62,16 @@ it("a typed Person tree", () => {
     fields: { age: new NumberSamplerGen({ type: "uniform", low: 0, high: 12, integer: true }) },
   });
   console.table(preview({ gen: kids, numRecords: 3, seed: 2026 }).records);
+});
+
+it("the same tree, step by step", () => {
+  // For loops, conditionals, or fields added later. Each field() is type-checked; completeness is
+  // checked at build() only for requiredKeys (types are erased, so the builder can't know them otherwise).
+  const b = TreeGen.builder<Pet>({ id: "Pet", requiredKeys: ["name", "species"] });
+  b.field({ name: "name", gen: new CategorySamplerGen({ values: ["Rex", "Tom"] }) });
+  b.field({ name: "species", gen: new CategorySamplerGen({ values: ["dog", "cat"] }) });
+  const pet = b.build();
+  console.table(preview({ gen: pet, numRecords: 3, seed: 1 }).records);
 });
 
 it("a Gen on its own", () => {
@@ -101,6 +116,9 @@ export function compileErrors(): void {
       heightCm,
     },
   });
+
+  // @ts-expect-error builder fields are type-checked too: species is a string.
+  TreeGen.builder<Pet>().field({ name: "species", gen: heightCm });
 
   // @ts-expect-error each number type has its own params: gaussian needs stddev, not high.
   new NumberSamplerGen({ type: "gaussian", mean: 170, high: 200 });

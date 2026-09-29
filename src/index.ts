@@ -24,4 +24,4 @@ export {
   type PoissonParams,
   type UniformParams,
 } from "./samplers/numeric";
-export { TreeGen, type Fields, type TreeCloneParams, type TreeGenParams } from "./tree";
+export { TreeBuilder, TreeGen, type Fields, type TreeBuilderParams, type TreeCloneParams, type TreeGenParams } from "./tree";
