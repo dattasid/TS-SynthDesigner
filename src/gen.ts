@@ -2,25 +2,73 @@ import type { Context } from "./context";
 import { ConfigError } from "./errors";
 
 /**
- * A typed pointer to a field of the tree being generated.
- * At runtime it is just the field name; at compile time it also carries the field's value type.
+ * Where a ref's path starts:
+ * - `self`: the object that holds the field (siblings).
+ * - `parent`: the object that contains that object.
+ * - `root`: the top-level record.
+ */
+export type RefScope = "self" | "parent" | "root";
+
+/**
+ * A typed pointer to a value in the record being generated.
+ * At runtime it is a scope and a path of keys; at compile time it also carries the value's type.
+ * When the plan is compiled, every ref is resolved to an absolute path from the root.
  */
 export class Ref<V> {
   /** Phantom: never set at runtime. It is what makes `Ref<number>` and `Ref<string>` incompatible. */
   declare readonly __value?: V;
 
-  constructor(readonly path: string) {}
+  constructor(
+    readonly scope: RefScope,
+    readonly path: readonly string[],
+  ) {}
+
+  toString(): string {
+    return `${this.scope}.${this.path.join(".")}`;
+  }
+}
+
+type Key<T> = keyof NonNullable<T> & string;
+type At<T, K extends PropertyKey> = NonNullable<T>[K & keyof NonNullable<T>];
+
+/** Makes typed refs into objects of type `T`, one to three keys deep. A key that does not exist is a compile error. */
+export interface RefFactory<T> {
+  <K1 extends Key<T>>(k1: K1): Ref<At<T, K1>>;
+  <K1 extends Key<T>, K2 extends Key<At<T, K1>>>(k1: K1, k2: K2): Ref<At<At<T, K1>, K2>>;
+  <K1 extends Key<T>, K2 extends Key<At<T, K1>>, K3 extends Key<At<At<T, K1>, K2>>>(
+    k1: K1,
+    k2: K2,
+    k3: K3,
+  ): Ref<At<At<At<T, K1>, K2>, K3>>;
+}
+
+function refFactory<T>(scope: RefScope): RefFactory<T> {
+  return ((...path: string[]) => new Ref(scope, path)) as RefFactory<T>;
 }
 
 /**
- * Returns a ref factory for fields of `T`. `ref("age")` is a `Ref<T["age"]>`, and a name that is not
- * a key of `T` is a compile error.
+ * Refs to siblings: fields of the object `T` that holds the field being bound.
  *
  *     const person = refs<Person>();
- *     cityGen.bind({ category: person("country") })
+ *     city: cityGen.bind({ category: person("country") })
  */
-export function refs<T>(): <K extends keyof T & string>(name: K) => Ref<T[K]> {
-  return (name) => new Ref(name);
+export function refs<T>(): RefFactory<T> {
+  return refFactory<T>("self");
+}
+
+/** Refs into `T`, the object that contains the object holding the field being bound (one level up). */
+export function parentRefs<T>(): RefFactory<T> {
+  return refFactory<T>("parent");
+}
+
+/**
+ * Refs into `T`, the top-level record, from any depth.
+ *
+ *     const root = rootRefs<Person>();
+ *     univCity: cityGen.bind({ category: root("country") })   // inside person.education
+ */
+export function rootRefs<T>(): RefFactory<T> {
+  return refFactory<T>("root");
 }
 
 /** One `Ref<V>` per input `V`: what `bind()` takes. */
@@ -92,7 +140,10 @@ export class BoundGen<Out> extends BaseGen<Out> {
   ) {
     super(gen.id);
     for (const [input, ref] of Object.entries(refs)) {
-      this.check(ref instanceof Ref, `input '${input}' must be a Ref, e.g. refs<Person>()("country").`);
+      this.check(
+        ref instanceof Ref && ref.path.length > 0,
+        `input '${input}' must be a Ref, e.g. refs<Person>()("country").`,
+      );
     }
   }
 

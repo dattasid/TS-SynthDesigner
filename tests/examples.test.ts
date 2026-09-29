@@ -6,6 +6,7 @@ import {
   NumberSamplerGen,
   preview,
   refs,
+  rootRefs,
   SubCategorySamplerGen,
   TreeGen,
 } from "../src/index";
@@ -74,6 +75,30 @@ it("the same tree, step by step", () => {
   console.table(preview({ gen: pet, numRecords: 3, seed: 1 }).records);
 });
 
+interface Student {
+  country: string;
+  education: { university: string; univCity: string };
+}
+
+it("reading a value from the top of the record", () => {
+  // student.education.univCity reads student.country. The plan generates country first.
+  const root = rootRefs<Student>();
+  const cityGen = new SubCategorySamplerGen({ values: { Canada: ["Toronto", "Montreal"], Japan: ["Kyoto"] } });
+
+  const student = new TreeGen<Student>({
+    fields: {
+      country: new CategorySamplerGen({ values: ["Canada", "Japan"] }),
+      education: new TreeGen<Student["education"]>({
+        fields: {
+          university: new CategorySamplerGen({ values: ["State University", "Tech Institute"] }),
+          univCity: cityGen.bind({ category: root("country") }),
+        },
+      }),
+    },
+  });
+  console.log(preview({ gen: student, numRecords: 3, seed: 3 }).records);
+});
+
 it("a Gen on its own", () => {
   const ctx = Context.create({ seed: 1 });
   const dice = new NumberSamplerGen({ type: "uniform", low: 1, high: 6, integer: true });
@@ -119,6 +144,10 @@ export function compileErrors(): void {
 
   // @ts-expect-error builder fields are type-checked too: species is a string.
   TreeGen.builder<Pet>().field({ name: "species", gen: heightCm });
+
+  // @ts-expect-error root refs are typed too: Student has no 'countryy'. Paths go up to three keys deep.
+  rootRefs<Student>()("countryy");
+  rootRefs<Student>()("education", "univCity"); // fine
 
   // @ts-expect-error each number type has its own params: gaussian needs stddev, not high.
   new NumberSamplerGen({ type: "gaussian", mean: 170, high: 200 });

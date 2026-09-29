@@ -1,6 +1,6 @@
 import type { Context } from "./context";
 import { ConfigError } from "./errors";
-import { BoundGen, type Gen } from "./gen";
+import { BoundGen, type Gen, type Ref } from "./gen";
 import { TreeGen } from "./tree";
 
 type AnyGen = Gen<unknown, any>;
@@ -99,12 +99,26 @@ function flatten(tree: TreeGen<object>, path: Path, parent: number, key: string,
     if (gen instanceof TreeGen) {
       flatten(gen, fieldPath, index, name, objects, steps);
     } else if (gen instanceof BoundGen) {
-      // Refs are relative to the tree that holds the field (siblings), so prefix the tree's path.
-      const inputs = Object.entries(gen.refs).map(([input, ref]) => [input, [...path, ref.path]] as const);
+      const inputs = Object.entries(gen.refs).map(([input, ref]) => [input, resolve(ref, path, fieldPath, input)] as const);
       steps.push({ path: fieldPath, gen: gen.gen, inputs, object: index, key: name });
     } else {
       steps.push({ path: fieldPath, gen, inputs: [], object: index, key: name });
     }
+  }
+}
+
+/** The absolute path a ref points to, given the path of the object holding the field. */
+function resolve(ref: Ref<unknown>, objectPath: Path, fieldPath: Path, input: string): Path {
+  switch (ref.scope) {
+    case "self":
+      return [...objectPath, ...ref.path];
+    case "parent":
+      if (objectPath.length === 0) {
+        throw new ConfigError(`field '${show(fieldPath)}' reads '${ref}' (input '${input}'), but its object is the root, so it has no parent.`);
+      }
+      return [...objectPath.slice(0, -1), ...ref.path];
+    case "root":
+      return ref.path;
   }
 }
 
@@ -119,6 +133,9 @@ function sortSteps(steps: Step[]): Step[] {
       const producers = steps.flatMap((s, i) => (startsWith(s.path, path) ? [i] : []));
       if (producers.length === 0) {
         throw new ConfigError(`field '${show(step.path)}' reads '${show(path)}' (input '${input}'), which no field generates.`);
+      }
+      if (producers.includes(steps.indexOf(step))) {
+        throw new ConfigError(`field '${show(step.path)}' reads '${show(path)}' (input '${input}'), which contains the field itself.`);
       }
       for (const p of producers) deps.add(p);
     }

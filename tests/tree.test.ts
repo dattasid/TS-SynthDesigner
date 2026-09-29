@@ -138,6 +138,6 @@ describe("TreeGen", () => {
         new TreeGen<{ city: string }>({
           fields: { city: cityGen.bind({ category: ref("country") }) },
         }),
-    ).toThrow(/reads 'country' \(input 'category'\), which is not a field of this tree/);
+    ).toThrow(/reads 'self.country' \(input 'category'\), but 'country' is not a field of this tree/);
   });
 });

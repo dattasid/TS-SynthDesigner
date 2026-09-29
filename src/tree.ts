@@ -88,13 +88,17 @@ export class TreeGen<T extends object> extends BaseGen<T> {
       const refs: Readonly<Record<string, Ref<unknown>>> = gen instanceof BoundGen ? gen.refs : {};
       const targets = new Set<string>();
       for (const [input, ref] of Object.entries(refs)) {
+        // Only sibling refs can be checked here; parent and root refs depend on where the tree is placed,
+        // so the plan checks them.
+        if (ref.scope !== "self") continue;
+        const target = ref.path[0]!;
         this.check(
-          names.includes(ref.path),
-          `field '${name}' reads '${ref.path}' (input '${input}'), which is not a field of this tree. ` +
+          names.includes(target),
+          `field '${name}' reads '${ref}' (input '${input}'), but '${target}' is not a field of this tree. ` +
             `Fields: ${names.join(", ")}.`,
         );
-        this.check(ref.path !== name, `field '${name}' reads itself.`);
-        targets.add(ref.path);
+        this.check(target !== name, `field '${name}' reads itself.`);
+        targets.add(target);
       }
       dependsOn.set(name, targets);
     }
