@@ -33,6 +33,15 @@ export interface TreeBuilderParams<T> {
 
 type AnyGen = Gen<unknown, any>;
 
+/** Throws via `fail` if `gen` declares inputs but is used without `bind()`. */
+export function checkBound(gen: AnyGen, where: string, fail: (message: string) => void): void {
+  if (gen instanceof BoundGen || gen instanceof TreeGen) return;
+  const needs = gen.inputNames ?? [];
+  if (needs.length > 0) {
+    fail(`${where} needs inputs (${needs.join(", ")}) but is not bound. Use .bind({ ${needs.map((n) => `${n}: ...`).join(", ")} }).`);
+  }
+}
+
 /**
  * Describes objects of type `T`: one Gen per field. A TreeGen is itself a Gen, so it can be a field
  * of another tree.
@@ -85,6 +94,7 @@ export class TreeGen<T extends object> extends BaseGen<T> {
     for (const name of names) {
       const gen = fields[name];
       this.check(typeof gen?.generate === "function", `field '${name}' is not a Gen.`);
+      checkBound(gen!, `field '${name}'`, (message) => this.check(false, message));
       const refs: Readonly<Record<string, Ref<unknown>>> = gen instanceof BoundGen ? gen.refs : {};
       const targets = new Set<string>();
       for (const [input, ref] of Object.entries(refs)) {

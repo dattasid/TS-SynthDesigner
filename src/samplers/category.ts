@@ -75,6 +75,10 @@ export class SubCategorySamplerGen<K extends string = string, V extends string =
     }
   }
 
+  override get inputNames(): readonly string[] {
+    return ["category"];
+  }
+
   generate({ category }: { category: K }, ctx: Context): V {
     const table = this.tables.get(category);
     if (!table) {

@@ -132,6 +132,18 @@ describe("TreeGen", () => {
         }),
     ).toThrow(new ConfigError("TreeGen 'Loop': dependency cycle among fields: a, b."));
 
+    // Without types (plain JavaScript, or a cast), declared input names are still checked at runtime.
+    const untyped = cityGen as any;
+    expect(() => new TreeGen<Person>({ fields: { ...personFields, city: untyped } })).toThrow(
+      new ConfigError(
+        "TreeGen: field 'city' needs inputs (category) but is not bound. Use .bind({ category: ... }).",
+      ),
+    );
+    expect(() => untyped.bind({})).toThrow(new ConfigError("bound SubCategorySamplerGen 'gen_city': missing inputs: category."));
+    expect(() => untyped.bind({ category: ref.country, extra: ref.age })).toThrow(
+      new ConfigError("bound SubCategorySamplerGen 'gen_city': unknown inputs: extra. Inputs: category."),
+    );
+
     // A ref made for a different type fails at runtime when its field is not in this tree.
     expect(
       () =>

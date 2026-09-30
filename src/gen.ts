@@ -106,6 +106,11 @@ export type Refs<Inputs> = { readonly [K in keyof Inputs]: Ref<Inputs[K]> };
  */
 export interface Gen<Out, Inputs = {}> {
   readonly id: string | undefined;
+  /**
+   * The names of `Inputs`, at runtime (types are erased). Lets `bind()` and the plan catch missing or
+   * unknown inputs from plain JavaScript or casts. `undefined` means not declared: nothing is checked.
+   */
+  readonly inputNames?: readonly string[];
   generate(inputs: Inputs, ctx: Context): Out;
   /**
    * Phantom, never set. A function-typed property is checked contravariantly, so a Gen that needs
@@ -119,6 +124,11 @@ export abstract class BaseGen<Out, Inputs = {}> implements Gen<Out, Inputs> {
   declare readonly __inputs?: (inputs: Inputs) => void;
 
   constructor(readonly id: string | undefined) {}
+
+  /** See `Gen.inputNames`. Subclasses with inputs override this; the default is "not declared". */
+  get inputNames(): readonly string[] | undefined {
+    return undefined;
+  }
 
   abstract generate(inputs: Inputs, ctx: Context): Out;
 
@@ -162,11 +172,24 @@ export class BoundGen<Out> extends BaseGen<Out> {
     readonly refs: Readonly<Record<string, Ref<unknown>>>,
   ) {
     super(gen.id);
+    const declared = gen.inputNames;
+    if (declared) {
+      const given = Object.keys(refs);
+      const missing = declared.filter((n) => !given.includes(n));
+      const unknown = given.filter((n) => !declared.includes(n));
+      this.check(missing.length === 0, `missing inputs: ${missing.join(", ")}.`);
+      this.check(unknown.length === 0, `unknown inputs: ${unknown.join(", ")}. Inputs: ${declared.join(", ") || "none"}.`);
+    }
     for (const [input, ref] of Object.entries(refs)) {
       const target = refTarget(ref);
       this.check(target !== undefined, `input '${input}' must be a ref, e.g. rootRefs<Person>().country.`);
       this.check(target!.path.length > 0, `input '${input}' is a whole ${target!.scope} object; bind a field of it instead.`);
     }
+  }
+
+  /** A bound Gen has no inputs left. */
+  override get inputNames(): readonly string[] {
+    return [];
   }
 
   protected override describe(): string {

@@ -1,7 +1,7 @@
 import type { Context } from "./context";
 import { ConfigError } from "./errors";
 import { BoundGen, refTarget, showRef, type Gen, type Ref } from "./gen";
-import { TreeGen } from "./tree";
+import { checkBound, TreeGen } from "./tree";
 
 type AnyGen = Gen<unknown, any>;
 type Path = readonly string[];
@@ -58,7 +58,12 @@ export class Plan<T> {
     if (gen instanceof BoundGen) {
       throw new ConfigError("A bound Gen reads other fields, so it only runs as a field of a TreeGen.");
     }
-    if (!(gen instanceof TreeGen)) return new Plan<T>([], [], gen as AnyGen);
+    if (!(gen instanceof TreeGen)) {
+      checkBound(gen as AnyGen, "the Gen", (message) => {
+        throw new ConfigError(message);
+      });
+      return new Plan<T>([], [], gen as AnyGen);
+    }
 
     const objects: ObjectSlot[] = [];
     const steps: Step[] = [];
@@ -102,6 +107,9 @@ function flatten(tree: TreeGen<object>, path: Path, parent: number, key: string,
       const inputs = Object.entries(gen.refs).map(([input, ref]) => [input, resolve(ref, path, fieldPath, input)] as const);
       steps.push({ path: fieldPath, gen: gen.gen, inputs, object: index, key: name });
     } else {
+      checkBound(gen, `field '${show(fieldPath)}'`, (message) => {
+        throw new ConfigError(message);
+      });
       steps.push({ path: fieldPath, gen, inputs: [], object: index, key: name });
     }
   }
