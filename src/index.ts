@@ -1,5 +1,6 @@
 export { Context, type ContextParams, type ModelConfig } from "./context";
 export { ConfigError, GenerationError } from "./errors";
+export { CustomGen, type CustomGenBoundParams, type CustomGenParams, type RefValue, type RefValues } from "./custom";
 export {
   BaseGen,
   BoundGen,

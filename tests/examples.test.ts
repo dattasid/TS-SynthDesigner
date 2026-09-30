@@ -1,8 +1,9 @@
 // API-shape examples. Kept small on purpose; the detailed tests are in the other files.
-import { expect, it } from "vitest";
+import { expect, expectTypeOf, it } from "vitest";
 import {
   CategorySamplerGen,
   Context,
+  CustomGen,
   NumberSamplerGen,
   preview,
   refs,
@@ -99,6 +100,51 @@ it("reading a value from the top of the record", () => {
   console.log(preview({ gen: student, numRecords: 3, seed: 3 }).records);
 });
 
+interface Worker {
+  age: number;
+  country: string;
+  education: { city: string };
+  occupation: string;
+  seniority: string;
+}
+
+it("custom Gens: plain functions, few types", () => {
+  const p = rootRefs<Worker>();
+
+  // Reusable: type the parameter once; the output type is inferred from the returns (TypeScript
+  // keeps the returned literals, which still fit the string field).
+  const occupationGen = new CustomGen({
+    fn: ({ age, country }: { age: number; country: string }) =>
+      age < 22 ? "Student" : country === "Canada" && age > 60 ? "Retired" : "Engineer",
+  });
+  expectTypeOf(occupationGen).toEqualTypeOf<CustomGen<"Student" | "Retired" | "Engineer", { age: number; country: string }>>();
+
+  const worker = new TreeGen<Worker>({
+    fields: {
+      age: new NumberSamplerGen({ type: "uniform", low: 18, high: 70, integer: true }),
+      country: new CategorySamplerGen({ values: ["Canada", "Japan"] }),
+      education: new TreeGen<Worker["education"]>({
+        fields: { city: new CategorySamplerGen({ values: ["Toronto", "Kyoto"] }) },
+      }),
+      occupation: occupationGen.bind({ age: p.age, country: p.country }),
+
+      // One-off: refs first, then the function. No annotations: age is a number and city a string,
+      // taken from the refs. Reads a value nested inside education.
+      seniority: CustomGen.bound({
+        inputs: { age: p.age, city: p.education.city },
+        fn: ({ age, city }, ctx) => {
+          const base = age < 30 ? "junior" : "senior";
+          return city === "Kyoto" && ctx.rng.random() < 0.5 ? `${base} (remote)` : base;
+        },
+      }),
+    },
+  });
+
+  const { records } = preview({ gen: worker, numRecords: 5, seed: 3 });
+  console.table(records.map(({ education, ...w }) => ({ ...w, city: education.city })));
+  for (const w of records) expect(w.seniority.startsWith(w.age < 30 ? "junior" : "senior")).toBe(true);
+});
+
 it("a Gen on its own", () => {
   const ctx = Context.create({ seed: 1 });
   const dice = new NumberSamplerGen({ type: "uniform", low: 1, high: 6, integer: true });
@@ -148,6 +194,25 @@ export function compileErrors(): void {
   // @ts-expect-error root refs are typed too: Student has no 'countryy'. Refs are plain property access, any depth.
   rootRefs<Student>().countryy;
   rootRefs<Student>().education.univCity; // fine
+
+  const w = rootRefs<Worker>();
+  CustomGen.bound({
+    inputs: { age: w.age },
+    // @ts-expect-error age is a number (from the ref), so it has no toUpperCase.
+    fn: ({ age }) => age.toUpperCase(),
+  });
+
+  new TreeGen<Pick<Worker, "age" | "seniority">>({
+    fields: {
+      age: new NumberSamplerGen({ type: "uniform", low: 18, high: 70, integer: true }),
+      // @ts-expect-error the function returns a number, but seniority is a string.
+      seniority: CustomGen.bound({ inputs: { age: w.age }, fn: ({ age }) => age * 2 }),
+    },
+  });
+
+  const occupationGen = new CustomGen({ fn: ({ age }: { age: number }) => (age < 22 ? "Student" : "Engineer") });
+  // @ts-expect-error the input 'age' is not bound.
+  occupationGen.bind({});
 
   // @ts-expect-error each number type has its own params: gaussian needs stddev, not high.
   new NumberSamplerGen({ type: "gaussian", mean: 170, high: 200 });
