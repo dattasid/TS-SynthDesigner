@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BaseGen, ConfigError, Context, parentRefs, Plan, preview, refs, rootRefs, TreeGen } from "../src/index";
+import { BaseGen, ConfigError, Context, parentRefs, Plan, preview, refs, rootRefs, showRef, TreeGen } from "../src/index";
 
 /** Test Gen: returns "<path>#<call>" and logs each call's path and inputs, so the run order is visible. */
 class ProbeGen<Inputs = {}> extends BaseGen<string, Inputs> {
@@ -35,10 +35,10 @@ describe("Plan", () => {
     const tree = new TreeGen<Person>({
       fields: {
         // Reads the whole nested object, so it runs after every field of `address`.
-        label: inputProbe<{ addr: Address }>().bind({ addr: person("address") }),
+        label: inputProbe<{ addr: Address }>().bind({ addr: person.address }),
         address: new TreeGen<Address>({
           fields: {
-            zip: inputProbe<{ street: string }>().bind({ street: address("street") }), // declared first, runs after street
+            zip: inputProbe<{ street: string }>().bind({ street: address.street }), // declared first, runs after street
             street: probe(),
           },
         }),
@@ -85,9 +85,9 @@ describe("Plan", () => {
       new TreeGen<Side>({
         fields: {
           w: new ProbeGen(log),
-          x: fields.x ? new ProbeGen<{ v: string }>(log).bind({ v: root(reads, "y") }) : new ProbeGen(log),
+          x: fields.x ? new ProbeGen<{ v: string }>(log).bind({ v: root[reads].y }) : new ProbeGen(log),
           y: new ProbeGen(log),
-          z: fields.z ? new ProbeGen<{ v: string }>(log).bind({ v: root(reads, "w") }) : new ProbeGen(log),
+          z: fields.z ? new ProbeGen<{ v: string }>(log).bind({ v: root[reads].w }) : new ProbeGen(log),
         },
       });
 
@@ -111,20 +111,20 @@ describe("Plan", () => {
     const nested = new TreeGen<Country>({
       fields: {
         code: new ProbeGen(log),
-        city: new TreeGen<City>({ fields: { name: new ProbeGen<{ code: string }>(log).bind({ code: country("code") }) } }),
+        city: new TreeGen<City>({ fields: { name: new ProbeGen<{ code: string }>(log).bind({ code: country.code }) } }),
       },
     });
     expect(Plan.compile(nested).order).toEqual(["code", "city.name"]);
 
     // Mistakes that only the plan can see, because they depend on where a tree is placed.
-    const orphan = new TreeGen<City>({ fields: { name: new ProbeGen<{ code: string }>(log).bind({ code: country("code") }) } });
+    const orphan = new TreeGen<City>({ fields: { name: new ProbeGen<{ code: string }>(log).bind({ code: country.code }) } });
     expect(() => Plan.compile(orphan)).toThrow(/its object is the root, so it has no parent/);
 
     const selfReader = new TreeGen<Doc>({
       fields: {
         a: new TreeGen<Side>({
           fields: {
-            w: new ProbeGen<{ v: Side }>(log).bind({ v: root("a") }), // reads its own enclosing object
+            w: new ProbeGen<{ v: Side }>(log).bind({ v: root.a }), // reads its own enclosing object
             x: new ProbeGen(log),
             y: new ProbeGen(log),
             z: new ProbeGen(log),
@@ -136,5 +136,29 @@ describe("Plan", () => {
     expect(() => Plan.compile(selfReader)).toThrow(
       new ConfigError("field 'a.w' reads 'a' (input 'v'), which contains the field itself."),
     );
+  });
+
+  it("refs are property access: any depth, and any field name", () => {
+    // `path` and `scope` would clash with a ref's own members if those were plain properties.
+    interface Deep {
+      path: string;
+      a: { b: { c: { scope: string } } };
+    }
+    const p = rootRefs<Deep>();
+    expect(showRef(p.a.b.c.scope)).toBe("root.a.b.c.scope");
+    expect(p.a.b).toBe(p.a.b); // the same ref object each time
+
+    const log: string[] = [];
+    type C = Deep["a"]["b"]["c"];
+    type B = Deep["a"]["b"];
+    const c = new TreeGen<C>({ fields: { scope: new ProbeGen(log) } });
+    const b = new TreeGen<B>({ fields: { c } });
+    const deep = new TreeGen<Deep>({
+      fields: {
+        path: new ProbeGen<{ v: string }>(log).bind({ v: p.a.b.c.scope }),
+        a: new TreeGen<Deep["a"]>({ fields: { b } }),
+      },
+    });
+    expect(Plan.compile(deep).order).toEqual(["a.b.c.scope", "path"]);
   });
 });

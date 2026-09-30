@@ -39,7 +39,7 @@ const personFields = {
     id: "gen_country",
     values: { "United States": 1, Canada: 1, India: 1, France: 1, Japan: 1 },
   }),
-  city: cityGen.bind({ category: ref("country") }),
+  city: cityGen.bind({ category: ref.country }),
   age: new NumberSamplerGen({ type: "uniform", low: 0, high: 100, integer: true }),
   heightCm: new NumberSamplerGen({ type: "gaussian", mean: 170, stddev: 10, decimalPlaces: 1 }),
 };
@@ -126,8 +126,8 @@ describe("TreeGen", () => {
         new TreeGen<Loop>({
           id: "Loop",
           fields: {
-            a: echo.bind({ category: loop("b") }),
-            b: echo.bind({ category: loop("a") }),
+            a: echo.bind({ category: loop.b }),
+            b: echo.bind({ category: loop.a }),
           },
         }),
     ).toThrow(new ConfigError("TreeGen 'Loop': dependency cycle among fields: a, b."));
@@ -136,7 +136,7 @@ describe("TreeGen", () => {
     expect(
       () =>
         new TreeGen<{ city: string }>({
-          fields: { city: cityGen.bind({ category: ref("country") }) },
+          fields: { city: cityGen.bind({ category: ref.country }) },
         }),
     ).toThrow(/reads 'self.country' \(input 'category'\), but 'country' is not a field of this tree/);
   });

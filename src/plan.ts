@@ -1,6 +1,6 @@
 import type { Context } from "./context";
 import { ConfigError } from "./errors";
-import { BoundGen, type Gen, type Ref } from "./gen";
+import { BoundGen, refTarget, showRef, type Gen, type Ref } from "./gen";
 import { TreeGen } from "./tree";
 
 type AnyGen = Gen<unknown, any>;
@@ -109,16 +109,17 @@ function flatten(tree: TreeGen<object>, path: Path, parent: number, key: string,
 
 /** The absolute path a ref points to, given the path of the object holding the field. */
 function resolve(ref: Ref<unknown>, objectPath: Path, fieldPath: Path, input: string): Path {
-  switch (ref.scope) {
+  const target = refTarget(ref)!;
+  switch (target.scope) {
     case "self":
-      return [...objectPath, ...ref.path];
+      return [...objectPath, ...target.path];
     case "parent":
       if (objectPath.length === 0) {
-        throw new ConfigError(`field '${show(fieldPath)}' reads '${ref}' (input '${input}'), but its object is the root, so it has no parent.`);
+        throw new ConfigError(`field '${show(fieldPath)}' reads '${showRef(ref)}' (input '${input}'), but its object is the root, so it has no parent.`);
       }
-      return [...objectPath.slice(0, -1), ...ref.path];
+      return [...objectPath.slice(0, -1), ...target.path];
     case "root":
-      return ref.path;
+      return target.path;
   }
 }
 

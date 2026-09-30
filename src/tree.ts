@@ -1,6 +1,6 @@
 import type { Context } from "./context";
 import { ConfigError } from "./errors";
-import { BaseGen, BoundGen, type Gen, type Ref } from "./gen";
+import { BaseGen, BoundGen, refTarget, showRef, type Gen, type Ref } from "./gen";
 import { Plan } from "./plan";
 
 /**
@@ -90,11 +90,12 @@ export class TreeGen<T extends object> extends BaseGen<T> {
       for (const [input, ref] of Object.entries(refs)) {
         // Only sibling refs can be checked here; parent and root refs depend on where the tree is placed,
         // so the plan checks them.
-        if (ref.scope !== "self") continue;
-        const target = ref.path[0]!;
+        const { scope, path } = refTarget(ref)!;
+        if (scope !== "self") continue;
+        const target = path[0]!;
         this.check(
           names.includes(target),
-          `field '${name}' reads '${ref}' (input '${input}'), but '${target}' is not a field of this tree. ` +
+          `field '${name}' reads '${showRef(ref)}' (input '${input}'), but '${target}' is not a field of this tree. ` +
             `Fields: ${names.join(", ")}.`,
         );
         this.check(target !== name, `field '${name}' reads itself.`);

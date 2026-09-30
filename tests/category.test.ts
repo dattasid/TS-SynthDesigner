@@ -41,7 +41,7 @@ describe("category samplers", () => {
             Canada: ["Toronto", "Vancouver"],
             France: { Paris: 3, Lyon: 1 }, // Paris three times as likely as Lyon
           },
-        }).bind({ category: ref("country") }),
+        }).bind({ category: ref.country }),
         country: new CategorySamplerGen<Country>({ values: ["Canada", "France"] }),
       },
     });
@@ -61,7 +61,7 @@ describe("category samplers", () => {
     const broken = new TreeGen<Loose>({
       fields: {
         country: new CategorySamplerGen({ values: ["Canada", "Mexico"] }),
-        city: new SubCategorySamplerGen({ values: { Canada: ["Toronto"] } }).bind({ category: loose("country") }),
+        city: new SubCategorySamplerGen({ values: { Canada: ["Toronto"] } }).bind({ category: loose.country }),
       },
     });
     expect(() => preview({ gen: broken, numRecords: 50, seed: 3 })).toThrow(GenerationError);
@@ -87,7 +87,7 @@ describe("category samplers", () => {
     const place = new TreeGen<Place>({
       fields: {
         country: new CategorySamplerGen({ values: Object.keys(cityMap) }),
-        city: cityGen.bind({ category: refs<Place>()("country") }),
+        city: cityGen.bind({ category: refs<Place>().country }),
       },
     });
     for (const { country, city } of preview({ gen: place, numRecords: 50, seed: 1 }).records) {

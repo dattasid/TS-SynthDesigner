@@ -9,66 +9,89 @@ import { ConfigError } from "./errors";
  */
 export type RefScope = "self" | "parent" | "root";
 
+/** Where a ref points, at runtime. */
+export interface RefTarget {
+  readonly scope: RefScope;
+  readonly path: readonly string[];
+}
+
+/** Key of a ref's runtime data. A symbol, so every plain name stays free for fields. */
+const REF_TARGET = Symbol("tdd.ref");
+/** Type-only key for the phantom value type. Never exists at runtime. */
+declare const REF_VALUE: unique symbol;
+
 /**
- * A typed pointer to a value in the record being generated.
- * At runtime it is a scope and a path of keys; at compile time it also carries the value's type.
+ * A typed pointer to a value in the record being generated. At runtime it is a scope and a path of
+ * keys; at compile time it also carries the value's type, so `Ref<number>` and `Ref<string>` differ.
  * When the plan is compiled, every ref is resolved to an absolute path from the root.
  */
-export class Ref<V> {
-  /** Phantom: never set at runtime. It is what makes `Ref<number>` and `Ref<string>` incompatible. */
-  declare readonly __value?: V;
-
-  constructor(
-    readonly scope: RefScope,
-    readonly path: readonly string[],
-  ) {}
-
-  toString(): string {
-    return `${this.scope}.${this.path.join(".")}`;
-  }
+export interface Ref<V> {
+  readonly [REF_VALUE]?: V;
 }
 
-type Key<T> = keyof NonNullable<T> & string;
-type At<T, K extends PropertyKey> = NonNullable<T>[K & keyof NonNullable<T>];
+/**
+ * A ref that can also be navigated by property access: `p.education.city` is a `RefTree` for
+ * `city`, and a `Ref<string>` wherever a ref is expected. Autocompletes, and a misspelled key is an
+ * ordinary "property does not exist" error. Values that are not objects cannot be navigated further.
+ */
+export type RefTree<T> = Ref<T> &
+  (NonNullable<T> extends object ? { readonly [K in keyof NonNullable<T> & string]-?: RefTree<NonNullable<T>[K]> } : {});
 
-/** Makes typed refs into objects of type `T`, one to three keys deep. A key that does not exist is a compile error. */
-export interface RefFactory<T> {
-  <K1 extends Key<T>>(k1: K1): Ref<At<T, K1>>;
-  <K1 extends Key<T>, K2 extends Key<At<T, K1>>>(k1: K1, k2: K2): Ref<At<At<T, K1>, K2>>;
-  <K1 extends Key<T>, K2 extends Key<At<T, K1>>, K3 extends Key<At<At<T, K1>, K2>>>(
-    k1: K1,
-    k2: K2,
-    k3: K3,
-  ): Ref<At<At<At<T, K1>, K2>, K3>>;
+/** The scope and path of a ref, or undefined if `value` is not a ref. */
+export function refTarget(value: unknown): RefTarget | undefined {
+  if ((typeof value !== "object" && typeof value !== "function") || value === null) return undefined;
+  return (value as { [REF_TARGET]?: RefTarget })[REF_TARGET];
 }
 
-function refFactory<T>(scope: RefScope): RefFactory<T> {
-  return ((...path: string[]) => new Ref(scope, path)) as RefFactory<T>;
+/** For error messages: `root.education.city`. */
+export function showRef(ref: unknown): string {
+  const target = refTarget(ref);
+  return target ? [target.scope, ...target.path].join(".") : String(ref);
+}
+
+function makeRef(scope: RefScope, path: readonly string[]): unknown {
+  const target: RefTarget = Object.freeze({ scope, path: Object.freeze([...path]) });
+  const children = new Map<string, unknown>();
+  // Each property access returns the ref one key deeper. Only refs are made here, while trees are
+  // set up; the plan resolves them to paths once, so the Proxy costs nothing per record.
+  return new Proxy(Object.create(null) as object, {
+    get(_, key) {
+      if (key === REF_TARGET) return target;
+      if (typeof key === "symbol") return undefined;
+      let child = children.get(key);
+      if (!child) children.set(key, (child = makeRef(scope, [...path, key])));
+      return child;
+    },
+    set() {
+      return false; // refs are read-only
+    },
+  });
 }
 
 /**
  * Refs to siblings: fields of the object `T` that holds the field being bound.
  *
  *     const person = refs<Person>();
- *     city: cityGen.bind({ category: person("country") })
+ *     city: cityGen.bind({ category: person.country })
  */
-export function refs<T>(): RefFactory<T> {
-  return refFactory<T>("self");
+export function refs<T>(): RefTree<T> {
+  return makeRef("self", []) as RefTree<T>;
 }
 
 /** Refs into `T`, the object that contains the object holding the field being bound (one level up). */
-export function parentRefs<T>(): RefFactory<T> {
-  return refFactory<T>("parent");
+export function parentRefs<T>(): RefTree<T> {
+  return makeRef("parent", []) as RefTree<T>;
 }
 
 /**
- * Refs into `T`, the top-level record, from any depth.
+ * Refs into `T`, the top-level record, from any depth. With a single root type, using these
+ * everywhere is simplest: every ref is a path from the top.
  *
- *     const root = rootRefs<Person>();
- *     univCity: cityGen.bind({ category: root("country") })   // inside person.education
+ *     const p = rootRefs<Person>();
+ *     univCity: cityGen.bind({ category: p.country })   // inside person.education
  */
-export function rootRefs<T>(): RefFactory<T> {
-  return refFactory<T>("root");
+export function rootRefs<T>(): RefTree<T> {
+  return makeRef("root", []) as RefTree<T>;
 }
 
 /** One `Ref<V>` per input `V`: what `bind()` takes. */
@@ -102,7 +125,7 @@ export abstract class BaseGen<Out, Inputs = {}> implements Gen<Out, Inputs> {
   /**
    * Decides which fields feed this Gen's inputs. Each ref's type must fit its input's type.
    *
-   *     city: cityGen.bind({ category: person("country") })
+   *     city: cityGen.bind({ category: person.country })
    */
   bind(inputs: Refs<Inputs>): BoundGen<Out> {
     return new BoundGen(this, inputs as Readonly<Record<string, Ref<unknown>>>);
@@ -140,10 +163,9 @@ export class BoundGen<Out> extends BaseGen<Out> {
   ) {
     super(gen.id);
     for (const [input, ref] of Object.entries(refs)) {
-      this.check(
-        ref instanceof Ref && ref.path.length > 0,
-        `input '${input}' must be a Ref, e.g. refs<Person>()("country").`,
-      );
+      const target = refTarget(ref);
+      this.check(target !== undefined, `input '${input}' must be a ref, e.g. rootRefs<Person>().country.`);
+      this.check(target!.path.length > 0, `input '${input}' is a whole ${target!.scope} object; bind a field of it instead.`);
     }
   }
 

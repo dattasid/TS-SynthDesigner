@@ -45,9 +45,9 @@ it("a typed Person tree", () => {
     fields: {
       name: new CategorySamplerGen({ values: ["John Smith", "Jane Doe"] }),
       country: countryGen,
-      city: cityGen.bind({ category: refOfPerson("country") }),
+      city: cityGen.bind({ category: refOfPerson.country }),
       birthCountry: countryGen,
-      birthCity: cityGen.bind({ category: refOfPerson("birthCountry") }), // same Gen, different input
+      birthCity: cityGen.bind({ category: refOfPerson.birthCountry }), // same Gen, different input
       age: new NumberSamplerGen({ type: "uniform", low: 18, high: 90, integer: true }),
       heightCm: new NumberSamplerGen({ type: "gaussian", mean: 170, stddev: 10, decimalPlaces: 1 }),
     },
@@ -91,7 +91,7 @@ it("reading a value from the top of the record", () => {
       education: new TreeGen<Student["education"]>({
         fields: {
           university: new CategorySamplerGen({ values: ["State University", "Tech Institute"] }),
-          univCity: cityGen.bind({ category: root("country") }),
+          univCity: cityGen.bind({ category: root.country }),
         },
       }),
     },
@@ -112,7 +112,7 @@ export function compileErrors(): void {
   const ref = refs<Person>();
 
   // @ts-expect-error 'nmae' is not a field of Person.
-  ref("nmae");
+  ref.nmae;
 
   const name = new CategorySamplerGen({ values: ["John Smith"] });
   const country = new CategorySamplerGen({ values: ["Canada"] });
@@ -145,15 +145,15 @@ export function compileErrors(): void {
   // @ts-expect-error builder fields are type-checked too: species is a string.
   TreeGen.builder<Pet>().field({ name: "species", gen: heightCm });
 
-  // @ts-expect-error root refs are typed too: Student has no 'countryy'. Paths go up to three keys deep.
-  rootRefs<Student>()("countryy");
-  rootRefs<Student>()("education", "univCity"); // fine
+  // @ts-expect-error root refs are typed too: Student has no 'countryy'. Refs are plain property access, any depth.
+  rootRefs<Student>().countryy;
+  rootRefs<Student>().education.univCity; // fine
 
   // @ts-expect-error each number type has its own params: gaussian needs stddev, not high.
   new NumberSamplerGen({ type: "gaussian", mean: 170, high: 200 });
 
   // @ts-expect-error bind() takes a Ref of the input's type: age is a number, category is a string.
-  new SubCategorySamplerGen({ values: { Canada: ["Toronto"] } }).bind({ category: ref("age") });
+  new SubCategorySamplerGen({ values: { Canada: ["Toronto"] } }).bind({ category: ref.age });
 
   // Opt-in literal types: write the key type, and the map must cover it. Contrived here; with plain
   // `string` keys (the default, as for cities above) a missing category is reported at generation time.
@@ -165,7 +165,7 @@ export function compileErrors(): void {
 
   // A Gen keyed by Size only accepts a Size field: a plain string field could hold anything.
   const colorBySize = new SubCategorySamplerGen<Size>({ values: { S: ["red"], M: ["blue"], L: ["green"] } });
-  colorBySize.bind({ category: refs<{ size: Size }>()("size") }); // fine
+  colorBySize.bind({ category: refs<{ size: Size }>().size }); // fine
   // @ts-expect-error Ref<string> is not a Ref<Size>.
-  colorBySize.bind({ category: refs<{ size: string }>()("size") });
+  colorBySize.bind({ category: refs<{ size: string }>().size });
 }
