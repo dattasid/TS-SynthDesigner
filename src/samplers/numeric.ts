@@ -1,5 +1,6 @@
 import type { Context } from "../context";
 import { binomial, normal, poisson, roundTo } from "../distributions";
+import { GenerationError } from "../errors";
 import { BaseGen, type Gen } from "../gen";
 
 // `type` and the parameter names follow DataDesigner's SamplerType values and sampler params (camelCased).
@@ -92,7 +93,12 @@ export class NumberSamplerGen extends BaseGen<number> {
       case "bernoulli_mixture":
         // Separate streams, so whether the mix fires does not shift the inner gen's samples.
         if (ctx.child("mix").rng.random() >= p.p) return 0;
-        return p.gen.generate({}, ctx.child("value"));
+        const value = p.gen.generate({}, ctx.child("value"));
+        if (value instanceof Promise) {
+          value.catch(() => {});
+          throw new GenerationError(`${this.describe()} at ${ctx.pathString}: the mixed-in gen is async; it must be sync.`);
+        }
+        return value;
     }
   }
 

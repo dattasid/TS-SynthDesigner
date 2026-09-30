@@ -3,10 +3,9 @@ import {
   NumberSamplerGen,
   ConfigError,
   Context,
-  type Gen,
 } from "../src/index";
 
-function sample(gen: Gen<number>, n = 20_000): number[] {
+function sample(gen: NumberSamplerGen, n = 20_000): number[] {
   const ctx = Context.create({ seed: 7 });
   return Array.from({ length: n }, () => gen.generate({}, ctx));
 }

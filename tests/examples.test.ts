@@ -28,7 +28,7 @@ interface Pet {
   species: string;
 }
 
-it("a typed Person tree", () => {
+it("a typed Person tree", async () => {
   const refOfPerson = refs<Person>();
 
   const countryGen = new CategorySamplerGen({ values: { Canada: 2, France: 1, Japan: 1 } });
@@ -54,26 +54,26 @@ it("a typed Person tree", () => {
     },
   });
 
-  const { records, seed } = preview({ gen: person, numRecords: 5, seed: 2026 });
+  const { records, seed } = await preview({ gen: person, numRecords: 5, seed: 2026 });
   console.table(records);
-  expect(preview({ gen: person, numRecords: 5, seed }).records).toEqual(records); // same seed, same data
+  expect((await preview({ gen: person, numRecords: 5, seed })).records).toEqual(records); // same seed, same data
 
   // A copy with some Gens replaced. It starts complete, so it stays complete.
   const kids = person.clone({
     id: "Kid",
     fields: { age: new NumberSamplerGen({ type: "uniform", low: 0, high: 12, integer: true }) },
   });
-  console.table(preview({ gen: kids, numRecords: 3, seed: 2026 }).records);
+  console.table((await preview({ gen: kids, numRecords: 3, seed: 2026 })).records);
 });
 
-it("the same tree, step by step", () => {
+it("the same tree, step by step", async () => {
   // For loops, conditionals, or fields added later. Each field() is type-checked; completeness is
   // checked at build() only for requiredKeys (types are erased, so the builder can't know them otherwise).
   const b = TreeGen.builder<Pet>({ id: "Pet", requiredKeys: ["name", "species"] });
   b.field({ name: "name", gen: new CategorySamplerGen({ values: ["Rex", "Tom"] }) });
   b.field({ name: "species", gen: new CategorySamplerGen({ values: ["dog", "cat"] }) });
   const pet = b.build();
-  console.table(preview({ gen: pet, numRecords: 3, seed: 1 }).records);
+  console.table((await preview({ gen: pet, numRecords: 3, seed: 1 })).records);
 });
 
 interface Student {
@@ -81,7 +81,7 @@ interface Student {
   education: { university: string; univCity: string };
 }
 
-it("reading a value from the top of the record", () => {
+it("reading a value from the top of the record", async () => {
   // student.education.univCity reads student.country. The plan generates country first.
   const root = rootRefs<Student>();
   const cityGen = new SubCategorySamplerGen({ values: { Canada: ["Toronto", "Montreal"], Japan: ["Kyoto"] } });
@@ -97,7 +97,7 @@ it("reading a value from the top of the record", () => {
       }),
     },
   });
-  console.log(preview({ gen: student, numRecords: 3, seed: 3 }).records);
+  console.log((await preview({ gen: student, numRecords: 3, seed: 3 })).records);
 });
 
 interface Worker {
@@ -108,7 +108,7 @@ interface Worker {
   seniority: string;
 }
 
-it("custom Gens: plain functions, few types", () => {
+it("custom Gens: plain functions, few types", async () => {
   const p = rootRefs<Worker>();
 
   // Reusable: type the parameter once; the output type is inferred from the returns (TypeScript
@@ -140,7 +140,7 @@ it("custom Gens: plain functions, few types", () => {
     },
   });
 
-  const { records } = preview({ gen: worker, numRecords: 5, seed: 3 });
+  const { records } = await preview({ gen: worker, numRecords: 5, seed: 3 });
   console.table(records.map(({ education, ...w }) => ({ ...w, city: education.city })));
   for (const w of records) expect(w.seniority.startsWith(w.age < 30 ? "junior" : "senior")).toBe(true);
 });

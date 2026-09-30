@@ -3,7 +3,7 @@ import {
   CategorySamplerGen,
   ConfigError,
   GenerationError,
-  preview,
+  previewSync,
   refs,
   SubCategorySamplerGen,
   TreeGen,
@@ -13,7 +13,7 @@ describe("category samplers", () => {
   it("CategorySamplerGen picks values by weight", () => {
     // Weights sit next to their values; there is no separate weights array to get out of sync.
     const plan = new CategorySamplerGen({ values: { free: 6, pro: 3, enterprise: 1 } });
-    const { records } = preview({ gen: plan, numRecords: 10_000, seed: 1 });
+    const { records } = previewSync({ gen: plan, numRecords: 10_000, seed: 1 });
     const share = (v: string) => records.filter((r) => r === v).length / records.length;
     expect(share("free")).toBeCloseTo(0.6, 1);
     expect(share("pro")).toBeCloseTo(0.3, 1);
@@ -21,7 +21,7 @@ describe("category samplers", () => {
 
     // A plain list means equal weights.
     const coin = new CategorySamplerGen({ values: ["heads", "tails"] });
-    expect(new Set(preview({ gen: coin, numRecords: 100, seed: 1 }).records)).toEqual(new Set(["heads", "tails"]));
+    expect(new Set(previewSync({ gen: coin, numRecords: 100, seed: 1 }).records)).toEqual(new Set(["heads", "tails"]));
 
     expect(() => new CategorySamplerGen({ id: "plan", values: { free: 0, pro: 0 } })).toThrow(ConfigError);
   });
@@ -46,7 +46,7 @@ describe("category samplers", () => {
       },
     });
 
-    const { records } = preview({ gen: place, numRecords: 1_000, seed: 3 });
+    const { records } = previewSync({ gen: place, numRecords: 1_000, seed: 3 });
     for (const { country, city } of records) {
       expect(country === "Canada" ? ["Toronto", "Vancouver"] : ["Paris", "Lyon"]).toContain(city);
     }
@@ -64,7 +64,7 @@ describe("category samplers", () => {
         city: new SubCategorySamplerGen({ values: { Canada: ["Toronto"] } }).bind({ category: loose.country }),
       },
     });
-    expect(() => preview({ gen: broken, numRecords: 50, seed: 3 })).toThrow(GenerationError);
+    expect(() => previewSync({ gen: broken, numRecords: 50, seed: 3 })).toThrow(GenerationError);
   });
 
   it("types stay plain strings, so values can come from a file", () => {
@@ -90,7 +90,7 @@ describe("category samplers", () => {
         city: cityGen.bind({ category: refs<Place>().country }),
       },
     });
-    for (const { country, city } of preview({ gen: place, numRecords: 50, seed: 1 }).records) {
+    for (const { country, city } of previewSync({ gen: place, numRecords: 50, seed: 1 }).records) {
       const options = cityMap[country]!;
       expect(Array.isArray(options) ? options : Object.keys(options)).toContain(city);
     }
@@ -98,7 +98,7 @@ describe("category samplers", () => {
 
   it("skew: rank-based weights for lists, most likely first", () => {
     const share = (gen: CategorySamplerGen, value: string) => {
-      const { records } = preview({ gen, numRecords: 20_000, seed: 2 });
+      const { records } = previewSync({ gen, numRecords: 20_000, seed: 2 });
       return records.filter((r) => r === value).length / records.length;
     };
     const five = ["a", "b", "c", "d", "e"];
@@ -127,7 +127,7 @@ describe("category samplers", () => {
         }).bind({ category: refs<Place>().country }),
       },
     });
-    const { records } = preview({ gen: place, numRecords: 20_000, seed: 2 });
+    const { records } = previewSync({ gen: place, numRecords: 20_000, seed: 2 });
     const firstShare = (country: string, first: string) => {
       const inCountry = records.filter((r) => r.country === country);
       return inCountry.filter((r) => r.city === first).length / inCountry.length;

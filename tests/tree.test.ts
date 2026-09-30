@@ -3,7 +3,7 @@ import {
   NumberSamplerGen,
   CategorySamplerGen,
   ConfigError,
-  preview,
+  previewSync,
   refs,
   SubCategorySamplerGen,
   TreeGen,
@@ -48,11 +48,11 @@ describe("TreeGen", () => {
   it("generates typed Person records, reproducibly from a seed", () => {
     const person = new TreeGen<Person>({ id: "Person", fields: personFields });
 
-    const first = preview({ gen: person, numRecords: 5, seed: 2026 });
-    const again = preview({ gen: person, numRecords: 5, seed: first.seed });
+    const first = previewSync({ gen: person, numRecords: 5, seed: 2026 });
+    const again = previewSync({ gen: person, numRecords: 5, seed: first.seed });
     expect(again.records).toEqual(first.records);
 
-    const other = preview({ gen: person, numRecords: 5, seed: 2027 });
+    const other = previewSync({ gen: person, numRecords: 5, seed: 2027 });
     expect(other.records).not.toEqual(first.records);
 
     // Adding a field does not change the other fields' values.
@@ -68,8 +68,8 @@ describe("TreeGen", () => {
     const without = new TreeGen<Person>({ fields: personFields });
 
     // Each field draws from its own stream, forked from the seed and the field name.
-    const a = preview({ gen: without, numRecords: 20, seed: 9 }).records;
-    const b = preview({ gen: withEmail, numRecords: 20, seed: 9 }).records;
+    const a = previewSync({ gen: without, numRecords: 20, seed: 9 }).records;
+    const b = previewSync({ gen: withEmail, numRecords: 20, seed: 9 }).records;
     expect(b.map(({ email: _email, ...rest }) => rest)).toEqual(a);
   });
 
@@ -79,7 +79,7 @@ describe("TreeGen", () => {
       id: "Kid",
       fields: { age: new NumberSamplerGen({ type: "uniform", low: 0, high: 12, integer: true }) },
     });
-    const records = preview({ gen: kids, numRecords: 50, seed: 4 }).records;
+    const records = previewSync({ gen: kids, numRecords: 50, seed: 4 }).records;
     expect(records.every((r) => r.age <= 12)).toBe(true);
     expect(adults.fields.age).toBe(personFields.age); // the original is unchanged
 
@@ -88,7 +88,7 @@ describe("TreeGen", () => {
       nickname?: string;
     }
     const pet = new TreeGen<Pet>({ fields: { name: new CategorySamplerGen({ values: ["Rex", "Tom"] }) } });
-    expect(Object.keys(preview({ gen: pet, numRecords: 1, seed: 1 }).records[0]!)).toEqual(["name"]);
+    expect(Object.keys(previewSync({ gen: pet, numRecords: 1, seed: 1 }).records[0]!)).toEqual(["name"]);
   });
 
   it("builder adds fields step by step; completeness is checked only against requiredKeys", () => {
@@ -100,8 +100,8 @@ describe("TreeGen", () => {
 
     // Same Gens as the fields-object tree, so the same records.
     const direct = new TreeGen<Person>({ id: "Person", fields: personFields });
-    expect(preview({ gen: built, numRecords: 5, seed: 8 }).records).toEqual(
-      preview({ gen: direct, numRecords: 5, seed: 8 }).records,
+    expect(previewSync({ gen: built, numRecords: 5, seed: 8 }).records).toEqual(
+      previewSync({ gen: direct, numRecords: 5, seed: 8 }).records,
     );
 
     expect(() => b.field({ name: "age", gen: personFields.age })).toThrow(

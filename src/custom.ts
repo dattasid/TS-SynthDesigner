@@ -1,5 +1,5 @@
 import type { Context } from "./context";
-import { BaseGen, BoundGen, type Ref } from "./gen";
+import { BaseGen, BoundGen, type MaybePromise, type Ref } from "./gen";
 
 /** The value type a ref points to: `Ref<number>` -> `number`. */
 export type RefValue<R> = R extends Ref<infer V> ? V : never;
@@ -10,7 +10,7 @@ export type RefValues<R> = { [K in keyof R]: RefValue<R[K]> };
 export interface CustomGenParams<Out, Inputs> {
   id?: string;
   /** Computes the value. Type the first parameter to declare the inputs; `Out` is inferred from the returns. */
-  fn: (inputs: Inputs, ctx: Context) => Out;
+  fn: (inputs: Inputs, ctx: Context) => MaybePromise<Out>;
 }
 
 export interface CustomGenBoundParams<R extends Record<string, Ref<unknown>>, Out> {
@@ -18,7 +18,7 @@ export interface CustomGenBoundParams<R extends Record<string, Ref<unknown>>, Ou
   /** Which fields feed the inputs: `{ age: p.age, city: p.education.city }`. */
   inputs: R;
   /** Computes the value. Its parameter types come from the refs, so nothing needs annotating. */
-  fn: (inputs: RefValues<R>, ctx: Context) => Out;
+  fn: (inputs: RefValues<R>, ctx: Context) => MaybePromise<Out>;
 }
 
 /**
@@ -39,9 +39,12 @@ export interface CustomGenBoundParams<R extends Record<string, Ref<unknown>>, Ou
  *     })
  *
  * Draw randomness only through `ctx.rng`, or through other Gens called with `ctx`.
+ *
+ * `fn` may be async (e.g. to call an HTTP API); the field's type is still the awaited value. Draw any
+ * randomness before the first `await`, so the draws happen in row order and the data is reproducible.
  */
 export class CustomGen<Out, Inputs = {}> extends BaseGen<Out, Inputs> {
-  readonly fn: (inputs: Inputs, ctx: Context) => Out;
+  readonly fn: (inputs: Inputs, ctx: Context) => MaybePromise<Out>;
 
   constructor({ id, fn }: CustomGenParams<Out, Inputs>) {
     super(id);
@@ -54,7 +57,7 @@ export class CustomGen<Out, Inputs = {}> extends BaseGen<Out, Inputs> {
     return new CustomGen<Out, RefValues<R>>({ id, fn }).bind(inputs as never);
   }
 
-  generate(inputs: Inputs, ctx: Context): Out {
+  generate(inputs: Inputs, ctx: Context): MaybePromise<Out> {
     return this.fn(inputs, ctx);
   }
 }

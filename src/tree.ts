@@ -1,6 +1,6 @@
 import type { Context } from "./context";
 import { ConfigError } from "./errors";
-import { BaseGen, BoundGen, refTarget, showRef, type Gen, type Ref } from "./gen";
+import { BaseGen, BoundGen, refTarget, showRef, type Gen, type MaybePromise, type Ref } from "./gen";
 import { Plan } from "./plan";
 
 /**
@@ -80,7 +80,7 @@ export class TreeGen<T extends object> extends BaseGen<T> {
   }
 
   /** Generates one object, running this tree's plan (compiled on first use, then reused). */
-  generate(_inputs: {}, ctx: Context): T {
+  generate(_inputs: {}, ctx: Context): MaybePromise<T> {
     this.plan ??= Plan.compile<T>(this);
     return this.plan.run(ctx);
   }

@@ -19,7 +19,7 @@ export type ResampledValue<V, E extends OnExhausted, D> = E extends "default" ? 
 
 interface ResamplerOptions<V, E extends OnExhausted, D> {
   id?: string;
-  /** Produces the candidates. Must not need inputs of its own. */
+  /** Produces the candidates. Must not need inputs of its own, and must be sync (async childGens come later). */
   childGen: Gen<V>;
   /** Tries per value before `onExhausted` applies. Default 100. */
   maxAttempts?: number;
@@ -97,7 +97,13 @@ export class ConditionalRejectionResamplerGen<V, Inputs = {}, E extends OnExhaus
   generate(inputs: Inputs, ctx: Context): ResampledValue<V, E, NoInfer<D>> {
     let value!: V;
     for (let attempt = 0; attempt < this.maxAttempts; attempt++) {
-      value = this.childGen.generate({}, ctx);
+      const candidate = this.childGen.generate({}, ctx);
+      if (candidate instanceof Promise) {
+        candidate.catch(() => {});
+        // Redrawing after an await would take this field's random draws out of row order.
+        throw new GenerationError(`${this.describe()} at ${ctx.pathString}: childGen is async; that is not supported yet.`);
+      }
+      value = candidate;
       if (this.accept(value, inputs)) return value;
     }
     switch (this.onExhausted) {

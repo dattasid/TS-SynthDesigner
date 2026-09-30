@@ -1,5 +1,22 @@
-import { describe, expect, it } from "vitest";
-import { BaseGen, ConfigError, Context, parentRefs, Plan, preview, refs, rootRefs, showRef, TreeGen } from "../src/index";
+import { describe, expect, expectTypeOf, it } from "vitest";
+import {
+  BaseGen,
+  CategorySamplerGen,
+  ConfigError,
+  Context,
+  CustomGen,
+  GenerationError,
+  NumberSamplerGen,
+  parentRefs,
+  Plan,
+  preview,
+  previewSync,
+  refs,
+  rootRefs,
+  showRef,
+  TreeGen,
+  type BoundGen,
+} from "../src/index";
 
 /** Test Gen: returns "<path>#<call>" and logs each call's path and inputs, so the run order is visible. */
 class ProbeGen<Inputs = {}> extends BaseGen<string, Inputs> {
@@ -60,17 +77,18 @@ describe("Plan", () => {
         "Level 2", "  label           <- addr=address"].join("\n"),
     );
 
-    const [first] = preview({ gen: tree, numRecords: 2, seed: 1 }).records;
+    const [first] = previewSync({ gen: tree, numRecords: 2, seed: 1 }).records;
+    // Both records are one batch: each level runs for every row before the next level starts, and
+    // each step runs for rows 0, 1, ... in order.
     expect(log).toEqual([
-      "address.street",
-      "address.zip(street=address.street#1)",
-      `label(addr={"zip":"address.zip#2","street":"address.street#1"})`,
+      "address.street", // level 0, row 0
+      "address.street", // level 0, row 1
       "name",
-      // Second record: same plan, same order.
-      "address.street",
-      "address.zip(street=address.street#5)",
-      `label(addr={"zip":"address.zip#6","street":"address.street#5"})`,
       "name",
+      "address.zip(street=address.street#1)", // level 1
+      "address.zip(street=address.street#2)",
+      `label(addr={"zip":"address.zip#5","street":"address.street#1"})`, // level 2
+      `label(addr={"zip":"address.zip#6","street":"address.street#2"})`,
     ]);
 
     // Objects are pre-shaped: keys come out in declaration order, not run order.
@@ -105,7 +123,7 @@ describe("Plan", () => {
     // call this a cycle; ordering single fields finds a valid order.
     const doc = new TreeGen<Doc>({ fields: { a: side("b", { x: "y" }), b: side("a", { z: "w" }) } });
     expect(Plan.compile(doc).order).toEqual(["a.w", "a.y", "a.z", "b.w", "b.x", "b.y", "a.x", "b.z"]);
-    preview({ gen: doc, numRecords: 1, seed: 1 });
+    previewSync({ gen: doc, numRecords: 1, seed: 1 });
     expect(log).toContain("a.x(v=b.y#6)");
     expect(log).toContain("b.z(v=a.w#1)");
 
@@ -170,5 +188,50 @@ describe("Plan", () => {
       },
     });
     expect(Plan.compile(deep).order).toEqual(["a.b.c.scope", "path"]);
+  });
+
+  it("async Gens: a level's calls run together, and the data does not depend on timing or batch size", async () => {
+    interface Row {
+      topic: string;
+      a: string;
+      b: string;
+      both: string;
+      n: number;
+    }
+    const p = rootRefs<Row>();
+    let inFlight = 0;
+    let maxInFlight = 0;
+    // Stands in for an LLM call: random latency, so calls finish in a different order on every run.
+    const slow = (label: string) =>
+      CustomGen.bound({
+        inputs: { topic: p.topic },
+        fn: async ({ topic }, ctx) => {
+          const draw = ctx.rng.int(0, 999); // randomness before the first await
+          maxInFlight = Math.max(maxInFlight, ++inFlight);
+          await new Promise((resolve) => setTimeout(resolve, Math.random() * 5));
+          inFlight--;
+          return `${label}:${topic}:${draw}`;
+        },
+      });
+    expectTypeOf(slow("a")).toEqualTypeOf<BoundGen<string>>(); // the awaited type, so it fits a string field
+
+    const tree = new TreeGen<Row>({
+      fields: {
+        topic: new CategorySamplerGen({ values: ["cats", "tax law", "jazz"] }),
+        a: slow("a"),
+        b: slow("b"),
+        both: CustomGen.bound({ inputs: { a: p.a, b: p.b }, fn: ({ a, b }) => `${a} | ${b}` }), // sync, reads async fields
+        n: new NumberSamplerGen({ type: "uniform", low: 0, high: 100, integer: true }),
+      },
+    });
+
+    const { records } = await preview({ gen: tree, numRecords: 6, seed: 5, batchSize: 6 });
+    expect(maxInFlight).toBe(12); // a and b are one level: 6 rows x 2 fields in flight at once
+    for (const r of records) expect(r.both).toBe(`${r.a} | ${r.b}`); // the next level saw values, not Promises
+    expect((await preview({ gen: tree, numRecords: 6, seed: 5, batchSize: 4 })).records).toEqual(records);
+    expect((await preview({ gen: tree, numRecords: 6, seed: 5, batchSize: 1 })).records).toEqual(records);
+
+    expect(() => previewSync({ gen: tree, numRecords: 1, seed: 5 })).toThrow(GenerationError);
+    expect(() => previewSync({ gen: tree, numRecords: 1, seed: 5 })).toThrow(/field 'a' returned a Promise/);
   });
 });

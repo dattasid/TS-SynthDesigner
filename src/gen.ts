@@ -98,6 +98,12 @@ export function rootRefs<T>(): RefTree<T> {
 export type Refs<Inputs> = { readonly [K in keyof Inputs]: Ref<Inputs[K]> };
 
 /**
+ * A value, or a Promise of one. Only Gens that wait on something slow (an LLM, an HTTP call) return
+ * Promises; number and category Gens stay plain synchronous code. The plan awaits only when needed.
+ */
+export type MaybePromise<T> = T | Promise<T>;
+
+/**
  * A generator of values of type `Out`.
  *
  * `Inputs` are named, typed slots for values the Gen needs from other fields (e.g. SubCategory's
@@ -111,7 +117,11 @@ export interface Gen<Out, Inputs = {}> {
    * unknown inputs from plain JavaScript or casts. `undefined` means not declared: nothing is checked.
    */
   readonly inputNames?: readonly string[];
-  generate(inputs: Inputs, ctx: Context): Out;
+  /**
+   * Produces one value. May return a Promise; if it does, draw all randomness from `ctx` before the
+   * first `await`, so the draws happen in row order (see Plan) and the data stays reproducible.
+   */
+  generate(inputs: Inputs, ctx: Context): MaybePromise<Out>;
   /**
    * Phantom, never set. A function-typed property is checked contravariantly, so a Gen that needs
    * inputs cannot be used where a Gen with no inputs is expected (e.g. as a tree field before `bind()`).
@@ -130,7 +140,7 @@ export abstract class BaseGen<Out, Inputs = {}> implements Gen<Out, Inputs> {
     return undefined;
   }
 
-  abstract generate(inputs: Inputs, ctx: Context): Out;
+  abstract generate(inputs: Inputs, ctx: Context): MaybePromise<Out>;
 
   /**
    * Decides which fields feed this Gen's inputs. Each ref's type must fit its input's type.

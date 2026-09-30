@@ -10,6 +10,7 @@ export {
   rootRefs,
   showRef,
   type Gen,
+  type MaybePromise,
   type Ref,
   type Refs,
   type RefScope,
@@ -24,7 +25,7 @@ export {
   type OnExhausted,
   type ResampledValue,
 } from "./resampler";
-export { preview, type PreviewParams, type PreviewResults } from "./preview";
+export { preview, previewSync, type PreviewParams, type PreviewResults } from "./preview";
 export { MersenneTwister, type Rng } from "./rng";
 export {
   CategorySamplerGen,

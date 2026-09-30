@@ -1,6 +1,6 @@
 import type { Context } from "./context";
-import { ConfigError } from "./errors";
-import { BoundGen, refTarget, showRef, type Gen, type Ref } from "./gen";
+import { ConfigError, GenerationError } from "./errors";
+import { BoundGen, refTarget, showRef, type Gen, type MaybePromise, type Ref } from "./gen";
 import { checkBound, TreeGen } from "./tree";
 
 type AnyGen = Gen<unknown, any>;
@@ -35,20 +35,36 @@ const startsWith = (path: Path, prefix: Path) => prefix.every((p, i) => path[i] 
  * A compiled generation plan: every field of every nested tree flattened into one list of steps,
  * sorted so each step comes after the values it reads.
  *
- * Built once from the tree structure and reused for every record. Per record, `run()` creates the
- * empty (pre-shaped) objects and fills them in step order, so several partial objects exist at once
- * and a step can read any value generated before it, anywhere in the record.
+ * Built once from the tree structure and reused for every record. Records are generated in batches:
+ * `runBatch()` creates the batch's empty (pre-shaped) objects, then runs the steps level by level,
+ * each step for every row of the batch, in row order. Several partial objects exist at once, and a
+ * step can read any value generated before it, anywhere in the record.
+ *
+ * Async Gens (LLMs, HTTP): a step may return Promises. They are not awaited one by one: the whole
+ * level is started, then all its Promises are awaited together, so the slow calls of a level, across
+ * all rows and fields, run in parallel. A level with no Promises never awaits, so a tree of sync Gens
+ * runs as plain synchronous code.
+ *
+ * Reproducibility: each field has one random stream (see `contextFor`), shared by all rows. Every step
+ * calls its Gen for rows 0, 1, 2... in order, so the draws happen in the same order on every run,
+ * whatever the batch size and however long the async calls take. The rule for async Gens is to draw
+ * before their first `await`. (Alternative, for out-of-order scheduling, resuming at row i or sharding:
+ * a seed per row per field. Cheap if each seed feeds a small generator, e.g. sfc32 or xoshiro128**
+ * seeded by hashing (seed, row, path); a Mersenne Twister per seed costs ~20 µs to set up. See Design.md.)
  */
 export class Plan<T> {
   /** Absolute paths of the steps, in the order they run. For inspection and tests. */
   readonly order: readonly string[];
   private readonly objects: readonly ObjectSlot[];
   private readonly steps: readonly Step[];
+  /** The steps grouped by level (see `levels()`), each level in run order. */
+  private readonly stepLevels: readonly (readonly Step[])[];
   private readonly single: AnyGen | undefined;
 
   private constructor(objects: ObjectSlot[], steps: Step[], single: AnyGen | undefined) {
     this.objects = objects;
     this.steps = steps;
+    this.stepLevels = groupByLevel(steps);
     this.single = single;
     this.order = single ? ["<root>"] : steps.map((s) => show(s.path));
   }
@@ -86,16 +102,8 @@ export class Plan<T> {
    * together (e.g. batched LLM calls).
    */
   levels(): string[][] {
-    const graph = this.graph();
-    const level = new Map<string, number>();
-    for (const { path, reads } of graph) {
-      // Run order guarantees every producer already has a level. Reading an object waits for all of its fields.
-      const deps = Object.values(reads).flatMap((r) => graph.filter((g) => g.path === r || g.path.startsWith(r + ".")));
-      level.set(path, deps.length ? 1 + Math.max(...deps.map((d) => level.get(d.path)!)) : 0);
-    }
-    const levels: string[][] = [];
-    for (const { path } of graph) (levels[level.get(path)!] ??= []).push(path);
-    return levels;
+    if (this.single) return [["<root>"]];
+    return this.stepLevels.map((level) => level.map((s) => show(s.path)));
   }
 
   /**
@@ -124,24 +132,86 @@ export class Plan<T> {
     return lines.join("\n");
   }
 
-  /** Generates one record. */
-  run(ctx: Context): T {
-    if (this.single) return this.single.generate({}, ctx) as T;
-
-    const objects: Record<string, unknown>[] = [];
-    for (const slot of this.objects) {
-      const obj = { ...slot.template } as Record<string, unknown>;
-      if (slot.parent >= 0) objects[slot.parent]![slot.key] = obj;
-      objects.push(obj);
-    }
-    const root = objects[0]!;
-    for (const step of this.steps) {
-      const inputs: Record<string, unknown> = {};
-      for (const [name, path] of step.inputs) inputs[name] = read(root, path);
-      objects[step.object]![step.key] = step.gen.generate(inputs, contextFor(ctx, step.path));
-    }
-    return root as T;
+  /** Generates one record. A Promise if an async Gen was involved. */
+  run(ctx: Context): MaybePromise<T> {
+    const batch = this.runBatch(ctx, 1);
+    return batch instanceof Promise ? batch.then((records) => records[0]!) : batch[0]!;
   }
+
+  /**
+   * Generates `count` records, level by level (see the class comment). Returns plain records if no
+   * Gen returned a Promise, otherwise a Promise of them. With `sync: true`, a Promise is an error
+   * naming the field, instead.
+   */
+  runBatch(ctx: Context, count: number, { sync = false }: { sync?: boolean } = {}): MaybePromise<T[]> {
+    if (this.single) {
+      const values = Array.from({ length: count }, () => this.single!.generate({}, ctx));
+      if (!values.some(isPromise)) return values as T[];
+      if (sync) asyncError("<root>", values);
+      return Promise.all(values) as Promise<T[]>;
+    }
+
+    const rows: Record<string, unknown>[][] = [];
+    for (let r = 0; r < count; r++) {
+      const objects: Record<string, unknown>[] = [];
+      for (const slot of this.objects) {
+        const obj = { ...slot.template } as Record<string, unknown>;
+        if (slot.parent >= 0) objects[slot.parent]![slot.key] = obj;
+        objects.push(obj);
+      }
+      rows.push(objects);
+    }
+    return this.runLevels(rows, ctx, 0, sync);
+  }
+
+  /** Runs levels from `from` on; at the first level that started Promises, awaits them and continues. */
+  private runLevels(rows: Record<string, unknown>[][], ctx: Context, from: number, sync: boolean): MaybePromise<T[]> {
+    for (let level = from; level < this.stepLevels.length; level++) {
+      const pending: Promise<void>[] = [];
+      for (const step of this.stepLevels[level]!) {
+        const stepCtx = contextFor(ctx, step.path);
+        for (const objects of rows) {
+          const inputs: Record<string, unknown> = {};
+          for (const [name, path] of step.inputs) inputs[name] = read(objects[0]!, path);
+          const value = step.gen.generate(inputs, stepCtx);
+          const target = objects[step.object]!;
+          if (!isPromise(value)) target[step.key] = value;
+          else if (sync) asyncError(show(step.path), [value, ...pending]);
+          else pending.push(value.then((v) => void (target[step.key] = v)));
+        }
+      }
+      if (pending.length > 0) return Promise.all(pending).then(() => this.runLevels(rows, ctx, level + 1, sync));
+    }
+    return rows.map((objects) => objects[0] as T);
+  }
+}
+
+const isPromise = (value: unknown): value is Promise<unknown> => value instanceof Promise;
+
+/** For sync runs: an async Gen was found. Its Promises are left to settle quietly. */
+function asyncError(path: string, started: readonly unknown[]): never {
+  for (const p of started) if (isPromise(p)) p.catch(() => {});
+  throw new GenerationError(
+    `field '${path}' returned a Promise (an async Gen, e.g. an LLM Gen). Use \`await preview(...)\` instead of previewSync().`,
+  );
+}
+
+/**
+ * Level 0 reads nothing; every other step sits one level above the highest step it reads (reading an
+ * object means reading every field under it). `steps` must be in run order.
+ */
+function groupByLevel(steps: readonly Step[]): Step[][] {
+  const levelOf = new Map<Step, number>();
+  const levels: Step[][] = [];
+  for (const step of steps) {
+    let level = 0;
+    for (const [, path] of step.inputs) {
+      for (const [producer, l] of levelOf) if (startsWith(producer.path, path)) level = Math.max(level, l + 1);
+    }
+    levelOf.set(step, level);
+    (levels[level] ??= []).push(step);
+  }
+  return levels;
 }
 
 /** Walks a tree depth-first, collecting object slots (parents first) and steps (declaration order). */
