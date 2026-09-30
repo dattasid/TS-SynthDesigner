@@ -55,6 +55,10 @@ describe("Plan", () => {
       { path: "label", reads: { addr: "address" } },
       { path: "name", reads: {} },
     ]);
+    expect(plan.toText()).toBe(
+      ["Level 0", "  address.street", "  name", "Level 1", "  address.zip     <- address.street",
+        "Level 2", "  label           <- addr=address"].join("\n"),
+    );
 
     const [first] = preview({ gen: tree, numRecords: 2, seed: 1 }).records;
     expect(log).toEqual([

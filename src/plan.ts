@@ -80,6 +80,50 @@ export class Plan<T> {
     return this.steps.map((s) => ({ path: show(s.path), reads: Object.fromEntries(s.inputs.map(([i, p]) => [i, show(p)])) }));
   }
 
+  /**
+   * Steps grouped by level: level 0 reads nothing, and each other step sits one level above the
+   * highest step it reads. Steps on the same level do not depend on each other, so they could run
+   * together (e.g. batched LLM calls).
+   */
+  levels(): string[][] {
+    const graph = this.graph();
+    const level = new Map<string, number>();
+    for (const { path, reads } of graph) {
+      // Run order guarantees every producer already has a level. Reading an object waits for all of its fields.
+      const deps = Object.values(reads).flatMap((r) => graph.filter((g) => g.path === r || g.path.startsWith(r + ".")));
+      level.set(path, deps.length ? 1 + Math.max(...deps.map((d) => level.get(d.path)!)) : 0);
+    }
+    const levels: string[][] = [];
+    for (const { path } of graph) (levels[level.get(path)!] ??= []).push(path);
+    return levels;
+  }
+
+  /**
+   * The plan as text, one level at a time, with what each step reads:
+   *
+   *     Level 1
+   *       city            <- category=country
+   *       occupation      <- age, country
+   *
+   * An input named like the last key of its path is shown by path only.
+   */
+  toText(): string {
+    const reads = new Map(this.graph().map((g) => [g.path, g.reads]));
+    const levels = this.levels();
+    const width = Math.max(...levels.flat().map((p) => p.length)) + 2;
+    const lines: string[] = [];
+    levels.forEach((paths, i) => {
+      lines.push(`Level ${i}`);
+      for (const path of paths) {
+        const inputs = Object.entries(reads.get(path)!).map(([input, from]) =>
+          input === from.split(".").pop() ? from : `${input}=${from}`,
+        );
+        lines.push(`  ${inputs.length ? path.padEnd(width) + "<- " + inputs.join(", ") : path}`);
+      }
+    });
+    return lines.join("\n");
+  }
+
   /** Generates one record. */
   run(ctx: Context): T {
     if (this.single) return this.single.generate({}, ctx) as T;
