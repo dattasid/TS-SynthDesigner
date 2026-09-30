@@ -7,9 +7,10 @@ import { BaseGen, type BoundGen, type Gen, type Ref } from "./gen";
  * What to do when no sample is accepted within `maxAttempts`:
  * - `fail`: throw a GenerationError (default).
  * - `keepLast`: use the last, rejected, sample.
- * - `default`: use `defaultValue`, which defaults to `null`. The Gen's type becomes `V | typeof defaultValue`:
- *   a default of the values' own type (e.g. "unemployed" for a string) leaves it unchanged; `null`
- *   makes it `V | null`, which only fits a field that allows null.
+ * - `default`: use `defaultValue`, which defaults to the text "None": human readable, and unlike ""
+ *   it does not look like "no data came in". The Gen's type becomes `V | typeof defaultValue`, so
+ *   "None" fits a string field as is, and a number field needs a `defaultValue` (a number, or `null`
+ *   for a field that allows null).
  */
 export type OnExhausted = "fail" | "keepLast" | "default";
 
@@ -23,7 +24,7 @@ interface ResamplerOptions<V, E extends OnExhausted, D> {
   /** Tries per value before `onExhausted` applies. Default 100. */
   maxAttempts?: number;
   onExhausted?: E;
-  /** The value used with `onExhausted: "default"`. Default `null`. */
+  /** The value used with `onExhausted: "default"`. Default "None". */
   defaultValue?: D;
 }
 
@@ -55,8 +56,8 @@ export interface ConditionalRejectionResamplerBoundParams<R extends Record<strin
  * plus `bind()`).
  */
 // NoInfer<D> throughout: D must come only from `defaultValue`. Otherwise, with no defaultValue, TypeScript
-// would infer D from where the Gen is used (e.g. a string field) and hide that the value is null.
-export class ConditionalRejectionResamplerGen<V, Inputs = {}, E extends OnExhausted = "fail", D = null> extends BaseGen<
+// would infer D from where the Gen is used (e.g. a number field) and hide that the value is "None".
+export class ConditionalRejectionResamplerGen<V, Inputs = {}, E extends OnExhausted = "fail", D = "None"> extends BaseGen<
   ResampledValue<V, E, NoInfer<D>>,
   Inputs
 > {
@@ -73,7 +74,7 @@ export class ConditionalRejectionResamplerGen<V, Inputs = {}, E extends OnExhaus
     this.accept = accept;
     this.maxAttempts = maxAttempts;
     this.onExhausted = onExhausted ?? "fail";
-    this.defaultValue = ("defaultValue" in params ? params.defaultValue : null) as NoInfer<D>;
+    this.defaultValue = ("defaultValue" in params ? params.defaultValue : "None") as NoInfer<D>;
     this.check(typeof childGen?.generate === "function", "childGen must be a Gen.");
     this.check(typeof accept === "function", "accept must be a function.");
     this.check(Number.isSafeInteger(maxAttempts) && maxAttempts >= 1, `maxAttempts must be an integer >= 1, got ${maxAttempts}.`);
@@ -86,7 +87,7 @@ export class ConditionalRejectionResamplerGen<V, Inputs = {}, E extends OnExhaus
   }
 
   /** The one-off form: already bound to `inputs`, ready to be a field. */
-  static bound<const R extends Record<string, Ref<unknown>>, V, E extends OnExhausted = "fail", D = null>(
+  static bound<const R extends Record<string, Ref<unknown>>, V, E extends OnExhausted = "fail", D = "None">(
     params: ConditionalRejectionResamplerBoundParams<R, V, E, D>,
   ): BoundGen<ResampledValue<V, E, NoInfer<D>>> {
     const { inputs, ...rest } = params;

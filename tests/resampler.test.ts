@@ -45,7 +45,7 @@ describe("ConditionalRejectionResamplerGen", () => {
     expect(preview({ gen: again, numRecords: 500, seed: 1 }).records).toEqual(records);
   });
 
-  it("onExhausted: fail (default), keepLast, or default (defaultValue, null unless given)", () => {
+  it('onExhausted: fail (default), keepLast, or default (defaultValue, "None" unless given)', () => {
     const never = (onExhausted: "fail" | "keepLast" | "default") =>
       new ConditionalRejectionResamplerGen({ childGen: occuGen, accept: () => false, maxAttempts: 3, onExhausted });
 
@@ -61,20 +61,28 @@ describe("ConditionalRejectionResamplerGen", () => {
 
     expect(occuGen.values).toContain(preview({ gen: never("keepLast"), numRecords: 1, seed: 1 }).records[0]);
 
-    // default without defaultValue: null, and the type says so.
+    // default without defaultValue: the text "None", which fits a string field as is.
+    const noneJob = new TreeGen<Job>({
+      fields: {
+        country,
+        occupation: ConditionalRejectionResamplerGen.bound({ childGen: occuGen, inputs: {}, accept: () => false, onExhausted: "default" }),
+      },
+    });
+    expect(preview({ gen: noneJob, numRecords: 1, seed: 1 }).records[0]!.occupation).toBe("None");
+
+    // A number field needs its own default: here null, which bonus allows.
     const nullBonus = ConditionalRejectionResamplerGen.bound({
       childGen: bonusGen,
       inputs: {},
       accept: (bonus) => bonus > 100,
       onExhausted: "default",
+      defaultValue: null,
     });
     expectTypeOf(nullBonus).toEqualTypeOf<BoundGen<number | null>>();
-    const withBonus = new TreeGen<Job>({
-      fields: { country, occupation: occuGen, bonus: nullBonus }, // bonus allows null
-    });
+    const withBonus = new TreeGen<Job>({ fields: { country, occupation: occuGen, bonus: nullBonus } });
     expect(preview({ gen: withBonus, numRecords: 1, seed: 1 }).records[0]!.bonus).toBeNull();
 
-    // A default of the values' own type keeps the type: it fits a required string field.
+    // Any other default of the values' own type works too.
     const job = new TreeGen<Job>({
       fields: {
         country,
@@ -92,16 +100,18 @@ describe("ConditionalRejectionResamplerGen", () => {
     new TreeGen<Job>({
       fields: {
         country,
-        // @ts-expect-error occupation is a required string; falling back to null gives string | null.
-        occupation: ConditionalRejectionResamplerGen.bound({ childGen: occuGen, inputs: {}, accept: () => true, onExhausted: "default" }),
+        occupation: occuGen,
+        // @ts-expect-error bonus is a number; falling back to "None" gives number | "None".
+        bonus: ConditionalRejectionResamplerGen.bound({ childGen: bonusGen, inputs: {}, accept: () => true, onExhausted: "default" }),
       },
     });
 
     new TreeGen<Job>({
       fields: {
         country,
-        // @ts-expect-error the same for the constructor form: the null default is not hidden by the field's type.
-        occupation: new ConditionalRejectionResamplerGen({ childGen: occuGen, accept: () => true, onExhausted: "default" }),
+        occupation: occuGen,
+        // @ts-expect-error the same for the constructor form: the "None" default is not hidden by the field's type.
+        bonus: new ConditionalRejectionResamplerGen({ childGen: bonusGen, accept: () => true, onExhausted: "default" }),
       },
     });
 
