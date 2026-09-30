@@ -214,6 +214,13 @@ export function compileErrors(): void {
   // @ts-expect-error the input 'age' is not bound.
   occupationGen.bind({});
 
+  // Rank-based weights for a list: first is most common. Only for lists, since a map already has weights.
+  new CategorySamplerGen({ values: ["Smith", "Jones", "Taylor", "Brown"], skew: "zipf" });
+  // @ts-expect-error skew needs values as a list, not a weight map.
+  new CategorySamplerGen({ values: { Smith: 3, Jones: 1 }, skew: "zipf" });
+  // @ts-expect-error the same for subcategories: every entry must be a list.
+  new SubCategorySamplerGen({ values: { Canada: ["Toronto"], France: { Paris: 3 } }, skew: "zipf" });
+
   // @ts-expect-error each number type has its own params: gaussian needs stddev, not high.
   new NumberSamplerGen({ type: "gaussian", mean: 170, high: 200 });
 

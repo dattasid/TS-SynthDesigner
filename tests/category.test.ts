@@ -95,4 +95,46 @@ describe("category samplers", () => {
       expect(Array.isArray(options) ? options : Object.keys(options)).toContain(city);
     }
   });
+
+  it("skew: rank-based weights for lists, most likely first", () => {
+    const share = (gen: CategorySamplerGen, value: string) => {
+      const { records } = preview({ gen, numRecords: 20_000, seed: 2 });
+      return records.filter((r) => r === value).length / records.length;
+    };
+    const five = ["a", "b", "c", "d", "e"];
+
+    // Zipf s = 1: weights 1, 1/2, 1/3, 1/4, 1/5, which normalize to about 44%, 22%, 15%, 11%, 9%.
+    const zipf = new CategorySamplerGen({ values: five, skew: "zipf" });
+    expect(share(zipf, "a")).toBeCloseTo(0.438, 1);
+    expect(share(zipf, "e")).toBeCloseTo(0.088, 1);
+
+    // Geometric r = 0.5: weights 1, 1/2, 1/4, 1/8, 1/16, about 52%, 26%, 13%, 6%, 3%.
+    const geometric = new CategorySamplerGen({ values: five, skew: { geometric: 0.5 } });
+    expect(share(geometric, "a")).toBeCloseTo(0.516, 1);
+    expect(share(geometric, "e")).toBeCloseTo(0.032, 1);
+
+    // SubCategory: each list is skewed on its own, so the first value's share depends on the list's length.
+    interface Place {
+      country: string;
+      city: string;
+    }
+    const place = new TreeGen<Place>({
+      fields: {
+        country: new CategorySamplerGen({ values: ["Short", "Long"] }),
+        city: new SubCategorySamplerGen({
+          values: { Short: ["s1", "s2"], Long: ["l1", "l2", "l3", "l4", "l5", "l6", "l7", "l8", "l9", "l10"] },
+          skew: "zipf",
+        }).bind({ category: refs<Place>().country }),
+      },
+    });
+    const { records } = preview({ gen: place, numRecords: 20_000, seed: 2 });
+    const firstShare = (country: string, first: string) => {
+      const inCountry = records.filter((r) => r.country === country);
+      return inCountry.filter((r) => r.city === first).length / inCountry.length;
+    };
+    expect(firstShare("Short", "s1")).toBeCloseTo(0.667, 1); // 1 / (1 + 1/2)
+    expect(firstShare("Long", "l1")).toBeCloseTo(0.341, 1); // 1 / (1 + 1/2 + ... + 1/10)
+
+    expect(() => new CategorySamplerGen({ values: five, skew: { geometric: 2 } })).toThrow(ConfigError);
+  });
 });

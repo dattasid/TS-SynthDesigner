@@ -31,6 +31,7 @@ export {
   SubCategorySamplerGen,
   type CategorySamplerParams,
   type CategoryValues,
+  type Skew,
   type SubCategorySamplerParams,
 } from "./samplers/category";
 export {
