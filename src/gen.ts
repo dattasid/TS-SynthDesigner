@@ -54,9 +54,13 @@ function makeRef(scope: RefScope, path: readonly string[]): unknown {
   const children = new Map<string, unknown>();
   // Each property access returns the ref one key deeper. Only refs are made here, while trees are
   // set up; the plan resolves them to paths once, so the Proxy costs nothing per record.
-  return new Proxy(Object.create(null) as object, {
+  const proxy: object = new Proxy(Object.create(null) as object, {
     get(_, key) {
       if (key === REF_TARGET) return target;
+      // `${ref}` in a plain template string would silently become garbage text; say what to do instead.
+      if (key === Symbol.toPrimitive) return () => {
+        throw new ConfigError(`${showRef(proxy)} is a ref, not a value, so it has no text. In a prompt, use the prompt\`...\` tag.`);
+      };
       if (typeof key === "symbol") return undefined;
       let child = children.get(key);
       if (!child) children.set(key, (child = makeRef(scope, [...path, key])));
@@ -66,6 +70,7 @@ function makeRef(scope: RefScope, path: readonly string[]): unknown {
       return false; // refs are read-only
     },
   });
+  return proxy;
 }
 
 /**
@@ -122,6 +127,11 @@ export interface Gen<Out, Inputs = {}> {
    * first `await`, so the draws happen in row order (see Plan) and the data stays reproducible.
    */
   generate(inputs: Inputs, ctx: Context): MaybePromise<Out>;
+  /**
+   * Optional. Called once before anything is generated, to check the Gen against the context, e.g.
+   * that an LLM Gen's model nickname exists. Throws a ConfigError if not.
+   */
+  checkContext?(ctx: Context): void;
   /**
    * Phantom, never set. A function-typed property is checked contravariantly, so a Gen that needs
    * inputs cannot be used where a Gen with no inputs is expected (e.g. as a tree field before `bind()`).

@@ -4,8 +4,11 @@ import {
   CategorySamplerGen,
   Context,
   CustomGen,
+  LLMTextGen,
+  MockProvider,
   NumberSamplerGen,
   preview,
+  prompt,
   refs,
   rootRefs,
   SubCategorySamplerGen,
@@ -143,6 +146,34 @@ it("custom Gens: plain functions, few types", async () => {
   const { records } = await preview({ gen: worker, numRecords: 5, seed: 3 });
   console.table(records.map(({ education, ...w }) => ({ ...w, city: education.city })));
   for (const w of records) expect(w.seniority.startsWith(w.age < 30 ? "junior" : "senior")).toBe(true);
+});
+
+it("an LLM field", async () => {
+  interface Profile {
+    name: string;
+    occupation: string;
+    bio: string;
+  }
+  const p = rootRefs<Profile>();
+  const profile = new TreeGen<Profile>({
+    fields: {
+      name: new CategorySamplerGen({ values: ["Ada", "Linus"] }),
+      occupation: new CategorySamplerGen({ values: ["engineer", "teacher"] }),
+      // The refs in the prompt are the fields it reads: no bind(), and a typo is a compile error.
+      bio: new LLMTextGen({ model: "fast", prompt: prompt`Write a one-line bio for ${p.name}, a ${p.occupation}.` }),
+    },
+  });
+
+  // For real: providers: { nvidia: Provider.nvidia() },
+  //           models: { fast: { provider: "nvidia", model: "meta/llama-3.1-8b-instruct", temperature: 0.9 } }
+  const { records } = await preview({
+    gen: profile,
+    numRecords: 3,
+    seed: 1,
+    providers: { mock: new MockProvider() }, // echoes the prompt
+    models: { fast: { provider: "mock", model: "echo" } },
+  });
+  console.table(records);
 });
 
 it("a Gen on its own", () => {

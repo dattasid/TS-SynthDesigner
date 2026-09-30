@@ -71,6 +71,8 @@ export class Plan<T> {
 
   /** Compiles the plan for `gen`. A TreeGen is flattened; any other Gen is a single step. */
   static compile<T>(gen: Gen<T>): Plan<T> {
+    // A bound Gen reading nothing (e.g. an LLMTextGen whose prompt has no refs) can run on its own.
+    if (gen instanceof BoundGen && Object.keys(gen.refs).length === 0) return new Plan<T>([], [], gen.gen as AnyGen);
     if (gen instanceof BoundGen) {
       throw new ConfigError("A bound Gen reads other fields, so it only runs as a field of a TreeGen.");
     }
@@ -130,6 +132,22 @@ export class Plan<T> {
       }
     });
     return lines.join("\n");
+  }
+
+  /**
+   * Checks every Gen against the context before anything is generated (e.g. LLM model nicknames),
+   * so a typo fails before the first call is paid for.
+   */
+  checkContext(ctx: Context): void {
+    const gens: [string, AnyGen][] = this.single ? [["<root>", this.single]] : this.steps.map((s) => [show(s.path), s.gen]);
+    for (const [path, gen] of gens) {
+      try {
+        gen.checkContext?.(ctx);
+      } catch (error) {
+        if (error instanceof ConfigError) throw new ConfigError(`field '${path}': ${error.message}`);
+        throw error;
+      }
+    }
   }
 
   /** Generates one record. A Promise if an async Gen was involved. */

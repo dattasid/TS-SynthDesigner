@@ -1,4 +1,5 @@
-import { Context, type ModelConfig } from "./context";
+import { Context, type ModelSpec } from "./context";
+import type { LLMProvider } from "./llm/provider";
 import type { Gen } from "./gen";
 import { Plan } from "./plan";
 
@@ -12,7 +13,10 @@ export interface PreviewParams<T> {
    * across the whole batch. Does not change the data: the same seed gives the same records at any size.
    */
   batchSize?: number;
-  modelConfigs?: readonly ModelConfig[];
+  /** Name -> provider, for LLM Gens: `{ nvidia: Provider.nvidia() }`. */
+  providers?: Readonly<Record<string, LLMProvider>>;
+  /** Nickname -> model spec; LLM Gens name a nickname: `{ fast: { provider: "nvidia", model: "..." } }`. */
+  models?: Readonly<Record<string, ModelSpec>>;
 }
 
 export interface PreviewResults<T> {
@@ -43,15 +47,16 @@ export function previewSync<T>(params: PreviewParams<T>): PreviewResults<T> {
   return { records, seed: ctx.seed };
 }
 
-function setUp<T>({ gen, numRecords = 10, seed, batchSize = 100, modelConfigs }: PreviewParams<T>) {
+function setUp<T>({ gen, numRecords = 10, seed, batchSize = 100, providers, models }: PreviewParams<T>) {
   if (!Number.isSafeInteger(numRecords) || numRecords < 0) {
     throw new RangeError(`numRecords must be an integer >= 0, got ${numRecords}.`);
   }
   if (!Number.isSafeInteger(batchSize) || batchSize < 1) {
     throw new RangeError(`batchSize must be an integer >= 1, got ${batchSize}.`);
   }
-  const ctx = Context.create({ seed, modelConfigs });
+  const ctx = Context.create({ seed, providers, models });
   const plan = Plan.compile(gen); // once, reused for every batch
+  plan.checkContext(ctx);
   const batches: number[] = [];
   for (let done = 0; done < numRecords; done += batchSize) batches.push(Math.min(batchSize, numRecords - done));
   return { ctx, plan, batches };

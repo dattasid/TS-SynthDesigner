@@ -1,4 +1,4 @@
-export { Context, type ContextParams, type ModelConfig } from "./context";
+export { Context, type ContextParams, type ModelSpec } from "./context";
 export { ConfigError, GenerationError } from "./errors";
 export { CustomGen, type CustomGenBoundParams, type CustomGenParams, type RefValue, type RefValues } from "./custom";
 export {
@@ -17,6 +17,20 @@ export {
   type RefTarget,
   type RefTree,
 } from "./gen";
+export { MockProvider, type MockProviderParams } from "./llm/mock";
+export { json, prompt, Prompt, type JsonRef, type PromptPart, type PromptScalar } from "./llm/prompt";
+export {
+  Limiter,
+  Provider,
+  type ApiFormat,
+  type ApiKeySource,
+  type Completion,
+  type CompletionRequest,
+  type LLMProvider,
+  type PresetParams,
+  type ProviderParams,
+} from "./llm/provider";
+export { LLMTextGen, type LLMTextGenParams } from "./llm/text";
 export { Plan } from "./plan";
 export {
   ConditionalRejectionResamplerGen,
