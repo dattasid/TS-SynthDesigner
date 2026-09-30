@@ -71,6 +71,15 @@ export class Plan<T> {
     return new Plan<T>(objects, sortSteps(steps), undefined);
   }
 
+  /**
+   * The dependency graph, in run order: each step's path and, per input, the path it reads.
+   * For inspection, printing and tests.
+   */
+  graph(): { path: string; reads: Record<string, string> }[] {
+    if (this.single) return [{ path: "<root>", reads: {} }];
+    return this.steps.map((s) => ({ path: show(s.path), reads: Object.fromEntries(s.inputs.map(([i, p]) => [i, show(p)])) }));
+  }
+
   /** Generates one record. */
   run(ctx: Context): T {
     if (this.single) return this.single.generate({}, ctx) as T;

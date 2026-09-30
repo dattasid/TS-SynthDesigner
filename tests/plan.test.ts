@@ -49,6 +49,12 @@ describe("Plan", () => {
     const plan = Plan.compile(tree);
     // When several steps are ready, the one declared first runs first: label (declared before name).
     expect(plan.order).toEqual(["address.street", "address.zip", "label", "name"]);
+    expect(plan.graph()).toEqual([
+      { path: "address.street", reads: {} },
+      { path: "address.zip", reads: { street: "address.street" } },
+      { path: "label", reads: { addr: "address" } },
+      { path: "name", reads: {} },
+    ]);
 
     const [first] = preview({ gen: tree, numRecords: 2, seed: 1 }).records;
     expect(log).toEqual([
