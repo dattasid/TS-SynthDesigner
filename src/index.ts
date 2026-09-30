@@ -17,6 +17,13 @@ export {
   type RefTree,
 } from "./gen";
 export { Plan } from "./plan";
+export {
+  ConditionalRejectionResamplerGen,
+  type ConditionalRejectionResamplerBoundParams,
+  type ConditionalRejectionResamplerParams,
+  type OnExhausted,
+  type ResampledValue,
+} from "./resampler";
 export { preview, type PreviewParams, type PreviewResults } from "./preview";
 export { MersenneTwister, type Rng } from "./rng";
 export {
