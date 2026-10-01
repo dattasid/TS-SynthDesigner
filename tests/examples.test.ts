@@ -1,8 +1,11 @@
 // API-shape examples. Kept small on purpose; the detailed tests are in the other files.
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { expect, expectTypeOf, it } from "vitest";
 import {
   CategorySamplerGen,
   Context,
+  create,
   CustomGen,
   LLMStructuredGen,
   LLMTextGen,
@@ -210,6 +213,19 @@ it("an LLM field with a JSON reply", async () => {
   console.table(records.map(({ name, backStory }) => ({ name, ...backStory })));
   console.log(mock.requests[0]!.prompt); // the prompt with the shape and field notes added
   expectTypeOf(records[0]!.backStory.mood).toEqualTypeOf<"calm" | "anxious">();
+});
+
+it("writing records to a JSONL file", async () => {
+  const pet = new TreeGen<Pet>({
+    id: "Pet",
+    fields: {
+      name: new CategorySamplerGen({ values: ["Rex", "Tom"] }),
+      species: new CategorySamplerGen({ values: ["dog", "cat"] }),
+    },
+  });
+  // Same params as preview, plus the path. Batches are written as they finish.
+  const { path, numRecords, seed } = await create({ gen: pet, numRecords: 1000, seed: 1, path: join(tmpdir(), "pets.jsonl"), overwrite: true });
+  console.log(`${numRecords} records in ${path} (seed ${seed})`);
 });
 
 it("a Gen on its own", () => {

@@ -26,7 +26,7 @@ export interface PreviewResults<T> {
 }
 
 /**
- * Generates a few records in memory. Mirrors DataDesigner's `preview()`; `create()` (to disk) comes later.
+ * Generates a few records in memory. Mirrors DataDesigner's `preview()`; `create()` writes them to a file.
  * Async because a tree may contain async Gens (LLMs); for trees without them, see `previewSync`.
  */
 export async function preview<T>(params: PreviewParams<T>): Promise<PreviewResults<T>> {
@@ -47,7 +47,7 @@ export function previewSync<T>(params: PreviewParams<T>): PreviewResults<T> {
   return { records, seed: ctx.seed };
 }
 
-function setUp<T>({ gen, numRecords = 10, seed, batchSize = 100, providers, models }: PreviewParams<T>) {
+export function setUp<T>({ gen, numRecords = 10, seed, batchSize = 100, providers, models }: PreviewParams<T>) {
   if (!Number.isSafeInteger(numRecords) || numRecords < 0) {
     throw new RangeError(`numRecords must be an integer >= 0, got ${numRecords}.`);
   }
