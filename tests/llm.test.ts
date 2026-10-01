@@ -18,6 +18,7 @@ import {
   rootRefs,
   TreeGen,
 } from "../src/index";
+import { liveSetup, skipLive } from "./live";
 
 /** A fetch that records requests and answers from `reply` (status + JSON body). */
 function fakeFetch(reply: (n: number) => { status: number; body: unknown; headers?: Record<string, string> }, delayMs = 0) {
@@ -266,13 +267,12 @@ describe("LLMTextGen", () => {
     expect(jsonExample.render(() => "{{ Ada }}")).toBe(`Reply as {"bio": "..."} for {{ Ada }}`);
   });
 
-  it.skipIf(!process.env.NVIDIA_API_KEY)("live: NVIDIA's hosted API", async () => {
+  it.skipIf(skipLive)("live: llama-3.1-8b on OpenRouter", async () => {
     const { records } = await preview({
       gen: personGen(new LLMTextGen({ model: "llama", prompt: prompt`In at most 8 words, describe a ${p.occupation} named ${p.name}.` })),
       numRecords: 2,
       seed: 1,
-      providers: { nvidia: Provider.nvidia() },
-      models: { llama: { provider: "nvidia", model: "meta/llama-3.1-8b-instruct", maxTokens: 40, temperature: 0.7 } },
+      ...liveSetup({ maxTokens: 40, temperature: 0.7 }),
     });
     console.table(records.map(({ name, occupation, bio }) => ({ name, occupation, bio })));
     for (const r of records) expect(r.bio.length).toBeGreaterThan(0);

@@ -15,6 +15,7 @@ import {
   type Infer,
   type LLMStructuredGenParams,
 } from "../src/index";
+import { liveSetup, skipLive } from "./live";
 
 const backStory = s.object({
   childhood: s.string({ description: "two sentences" }),
@@ -156,7 +157,7 @@ describe("LLMStructuredGen", () => {
     expect(() => new LLMStructuredGen({ ...base, schemaInPrompt: "shape" as never })).toThrow(/schemaInPrompt must be one of/);
   });
 
-  it.skipIf(!process.env.NVIDIA_API_KEY)("live: NVIDIA's hosted API", async () => {
+  it.skipIf(skipLive)("live: llama-3.1-8b on OpenRouter", async () => {
     const { records } = await preview({
       gen: new TreeGen<Person>({
         fields: {
@@ -166,8 +167,7 @@ describe("LLMStructuredGen", () => {
       }),
       numRecords: 4,
       seed: 1,
-      providers: { nvidia: Provider.nvidia() },
-      models: { llama: { provider: "nvidia", model: "meta/llama-3.1-8b-instruct", maxTokens: 300, temperature: 0.7 } },
+      ...liveSetup({ maxTokens: 300, temperature: 0.7 }),
     });
     console.table(records.map(({ name, backStory }) => ({ name, ...backStory })));
     for (const r of records) expect(backStory.validate(r.backStory).ok).toBe(true);
