@@ -245,6 +245,21 @@ describe("LLMTextGen", () => {
     expect(() => `Bio for ${p.name}`).toThrow(/root\.name is a ref, not a value.*use the prompt`\.\.\.` tag/);
   });
 
+  it("{{ }} (DataDesigner's Jinja syntax) is an error, in any prompt form", () => {
+    const hint = "Read fields with the prompt tag: prompt`... ${p.name} ...`";
+    expect(() => new LLMTextGen({ model: "fast", prompt: "Write a bio for {{ name }}." })).toThrow(ConfigError);
+    expect(() => new LLMTextGen({ model: "fast", prompt: "Write a bio for {{ name }}." })).toThrow(`found "{{ name }}"`);
+    expect(() => new LLMTextGen({ model: "fast", prompt: "Write a bio for {{ name }}." })).toThrow(hint);
+    expect(() => prompt`Bio for {{name}}, a ${p.occupation}`).toThrow(hint);
+    expect(() => new LLMTextGen({ model: "fast", prompt: "Hi", systemPrompt: "You are {{ persona }}" })).toThrow(/p\.persona/);
+    expect(() => prompt`Bio for ${"{{"}name}}`).toThrow(ConfigError); // constants are part of the text too
+    expect(() => prompt`Return {{ unclosed`).toThrow(`found "{{ unclosed"`);
+
+    // Single braces (JSON examples) are fine, and field values are data: never checked.
+    const jsonExample = prompt`Reply as {"bio": "..."} for ${p.name}`;
+    expect(jsonExample.render(() => "{{ Ada }}")).toBe(`Reply as {"bio": "..."} for {{ Ada }}`);
+  });
+
   it.skipIf(!process.env.NVIDIA_API_KEY)("live: NVIDIA's hosted API", async () => {
     const { records } = await preview({
       gen: personGen(new LLMTextGen({ model: "llama", prompt: prompt`In at most 8 words, describe a ${p.occupation} named ${p.name}.` })),

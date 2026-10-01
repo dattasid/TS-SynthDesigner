@@ -54,6 +54,7 @@ export class Prompt {
       }
       pieces.push(strings[i + 1]!);
     });
+    checkNoBraces(pieces.filter((p): p is string => typeof p === "string").join(""));
     this.refsByKey = refsByKey;
     this.pieces = pieces;
   }
@@ -75,6 +76,22 @@ export class Prompt {
     }
     return out;
   }
+}
+
+/**
+ * `{{ name }}` is DataDesigner's (Jinja) syntax. Here it would reach the LLM as is, without reading the
+ * field, so any `{{` in a prompt's own text is an error. (Field values are data and are not checked.)
+ */
+function checkNoBraces(text: string): void {
+  const at = text.indexOf("{{");
+  if (at < 0) return;
+  const close = text.indexOf("}}", at);
+  const snippet = text.slice(at, close >= 0 && close - at < 60 ? close + 2 : at + 20);
+  const field = /^\{\{\s*([\w.]+)\s*\}\}$/.exec(snippet)?.[1];
+  throw new ConfigError(
+    `prompt: found ${JSON.stringify(snippet)}. {{ }} is DataDesigner/Jinja syntax and would be sent to the LLM as is. ` +
+      `Read fields with the prompt tag: prompt\`... \${p.${field ?? "field"}} ...\`, with p = rootRefs<YourType>().`,
+  );
 }
 
 /**
