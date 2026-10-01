@@ -2,3 +2,5 @@ node_modules/
 dist/
 coverage/
 scratch/
+OPENROUTER_API_KEY
+*_API_KEY
