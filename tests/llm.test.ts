@@ -88,6 +88,12 @@ describe("Provider", () => {
       messages: [{ role: "user", content: "Hi" }], // and no seed: Anthropic has none
     });
 
+    // A reply stopped by the token limit is marked, in either format.
+    const cut = fakeFetch(() => ({ status: 200, body: { choices: [{ message: { content: "Hel" }, finish_reason: "length" }] } }));
+    expect(await Provider.openai({ apiKey: { env: "TDD_TEST_KEY" }, fetch: cut.fn }).complete({ model: "m", prompt: "Hi" })).toMatchObject({ truncated: true });
+    const cutA = fakeFetch(() => ({ status: 200, body: { content: [{ type: "text", text: "Hel" }], stop_reason: "max_tokens" } }));
+    expect(await Provider.anthropic({ apiKey: { env: "TDD_TEST_KEY" }, fetch: cutA.fn }).complete({ model: "m", prompt: "Hi" })).toMatchObject({ truncated: true });
+
     const ollama = fakeFetch(() => ({ status: 200, body: openaiReply("ok") }));
     await Provider.ollama({ fetch: ollama.fn }).complete({ model: "llama3.2", prompt: "Hi" });
     expect(ollama.calls[0]!.url).toBe("http://localhost:11434/v1/chat/completions");
