@@ -4,6 +4,7 @@ import {
   CategorySamplerGen,
   Context,
   CustomGen,
+  LLMStructuredGen,
   LLMTextGen,
   MockProvider,
   NumberSamplerGen,
@@ -11,8 +12,10 @@ import {
   prompt,
   refs,
   rootRefs,
+  s,
   SubCategorySamplerGen,
   TreeGen,
+  type Infer,
 } from "../src/index";
 
 // Plain strings: the values can come from a hand-written list today and a data file tomorrow.
@@ -174,6 +177,39 @@ it("an LLM field", async () => {
     models: { fast: { provider: "mock", model: "echo" } },
   });
   console.table(records);
+});
+
+it("an LLM field with a JSON reply", async () => {
+  // One definition: the type, the validation, and what the model is told about the reply.
+  const backStory = s.object({
+    childhood: s.string({ description: "two sentences about where they grew up" }),
+    happiness: s.integer({ min: 1, max: 10 }),
+    mood: s.enum(["calm", "anxious"]),
+  });
+  interface Profile {
+    name: string;
+    backStory: Infer<typeof backStory>;
+  }
+  const p = rootRefs<Profile>();
+  const profile = new TreeGen<Profile>({
+    fields: {
+      name: new CategorySamplerGen({ values: ["Ada", "Linus"] }),
+      // The reply is parsed, checked against the schema (retried with the problems if invalid) and typed.
+      backStory: new LLMStructuredGen({ model: "fast", prompt: prompt`Invent a backstory for ${p.name}.`, schema: backStory }),
+    },
+  });
+
+  const mock = new MockProvider({ respond: () => '{"childhood": "Grew up by the sea.", "happiness": 7, "mood": "calm"}' });
+  const { records } = await preview({
+    gen: profile,
+    numRecords: 2,
+    seed: 1,
+    providers: { mock },
+    models: { fast: { provider: "mock", model: "m" } },
+  });
+  console.table(records.map(({ name, backStory }) => ({ name, ...backStory })));
+  console.log(mock.requests[0]!.prompt); // the prompt with the shape and field notes added
+  expectTypeOf(records[0]!.backStory.mood).toEqualTypeOf<"calm" | "anxious">();
 });
 
 it("a Gen on its own", () => {
