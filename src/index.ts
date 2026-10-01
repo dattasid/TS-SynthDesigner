@@ -30,6 +30,7 @@ export {
   type PresetParams,
   type ProviderParams,
 } from "./llm/provider";
+export { LLMStructuredGen, parseJsonReply, type LLMStructuredGenParams, type SchemaInPrompt } from "./llm/structured";
 export { LLMTextGen, type LLMTextGenParams } from "./llm/text";
 export { Plan } from "./plan";
 export {

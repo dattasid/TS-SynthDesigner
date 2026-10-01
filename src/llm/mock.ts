@@ -2,8 +2,11 @@ import { Limiter, type Completion, type CompletionRequest, type LLMProvider } fr
 
 export interface MockProviderParams {
   name?: string;
-  /** The reply. Default: `[<model> seed=<seed>] <prompt>`, so tests can see exactly what was sent. */
-  respond?: (request: CompletionRequest) => string | Promise<string>;
+  /**
+   * The reply: text, or a whole `Completion` (e.g. `{ text, truncated: true }`). Default:
+   * `[<model> seed=<seed>] <prompt>`, so tests can see exactly what was sent.
+   */
+  respond?: (request: CompletionRequest) => string | Completion | Promise<string | Completion>;
   /** Simulated latency in ms: a number, or `[min, max]` for random latency (timing only, not the data). */
   latencyMs?: number | readonly [number, number];
   /** Requests in flight at once, like `Provider`'s. Default: no limit. */
@@ -17,7 +20,8 @@ export class MockProvider implements LLMProvider {
   /** The most requests that were in flight at once. */
   maxInFlight = 0;
   private inFlight = 0;
-  private readonly respond: (request: CompletionRequest) => string | Promise<string>;
+  readonly supportsGuidedDecoding = true;
+  private readonly respond: (request: CompletionRequest) => string | Completion | Promise<string | Completion>;
   private readonly latencyMs: number | readonly [number, number];
   private readonly limiter: Limiter;
 
@@ -38,7 +42,8 @@ export class MockProvider implements LLMProvider {
     try {
       const ms = typeof this.latencyMs === "number" ? this.latencyMs : this.latencyMs[0] + Math.random() * (this.latencyMs[1] - this.latencyMs[0]);
       if (ms > 0) await new Promise((resolve) => setTimeout(resolve, ms));
-      return { text: await this.respond(request) };
+      const reply = await this.respond(request);
+      return typeof reply === "string" ? { text: reply } : reply;
     } finally {
       this.inFlight--;
     }

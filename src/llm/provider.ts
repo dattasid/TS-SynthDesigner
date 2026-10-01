@@ -14,16 +14,22 @@ export interface CompletionRequest {
   seed?: number;
   /** Provider-specific body fields, passed through untouched. */
   extra?: Readonly<Record<string, unknown>>;
+  /** Guided decoding: the API constrains the reply to this JSON Schema. Only if `supportsGuidedDecoding`. */
+  jsonSchema?: Readonly<Record<string, unknown>>;
 }
 
 export interface Completion {
   text: string;
   usage?: { inputTokens: number; outputTokens: number };
+  /** The reply stopped at the token limit (`maxTokens`), so it is incomplete. */
+  truncated?: boolean;
 }
 
 /** Anything that answers completion requests: a real `Provider`, or a `MockProvider` in tests. */
 export interface LLMProvider {
   readonly name: string;
+  /** Whether requests may carry `jsonSchema`. Default false. */
+  readonly supportsGuidedDecoding?: boolean;
   complete(request: CompletionRequest): Promise<Completion>;
 }
 
@@ -69,6 +75,11 @@ export class Provider implements LLMProvider {
   readonly name: string;
   readonly api: ApiFormat;
   readonly baseUrl: string;
+  /**
+   * The OpenAI format sends `response_format: json_schema` (OpenAI, Ollama, vLLM, recent NIMs).
+   * An endpoint may still ignore it silently; replies are validated either way.
+   */
+  readonly supportsGuidedDecoding: boolean;
   private readonly apiKey: ApiKeySource | undefined;
   private readonly maxRetries: number;
   private readonly retryBaseMs: number;
@@ -89,6 +100,7 @@ export class Provider implements LLMProvider {
     this.name = name;
     this.api = api;
     this.baseUrl = baseUrl.replace(/\/+$/, "");
+    this.supportsGuidedDecoding = api === "openai";
     this.apiKey = apiKey;
     this.maxRetries = maxRetries;
     this.retryBaseMs = retryBaseMs;
@@ -195,14 +207,19 @@ const ADAPTERS: Record<ApiFormat, Adapter> = {
       body: {
         ...defined({ model: r.model, temperature: r.temperature, max_tokens: r.maxTokens, top_p: r.topP, seed: r.seed }),
         messages: [...(r.system ? [{ role: "system", content: r.system }] : []), { role: "user", content: r.prompt }],
+        ...(r.jsonSchema && { response_format: { type: "json_schema", json_schema: { name: "reply", strict: true, schema: r.jsonSchema } } }),
         ...r.extra,
       },
     }),
     parse: (json, provider) => {
-      const j = json as { choices?: { message?: { content?: string | null } }[]; usage?: { prompt_tokens: number; completion_tokens: number } };
+      const j = json as {
+        choices?: { message?: { content?: string | null }; finish_reason?: string }[];
+        usage?: { prompt_tokens: number; completion_tokens: number };
+      };
       const text = j.choices?.[0]?.message?.content;
       if (typeof text !== "string" || text === "") throw new GenerationError(`Provider '${provider}': empty reply.`);
-      return { text, usage: j.usage && { inputTokens: j.usage.prompt_tokens, outputTokens: j.usage.completion_tokens } };
+      const usage = j.usage && { inputTokens: j.usage.prompt_tokens, outputTokens: j.usage.completion_tokens };
+      return { text, usage, ...(j.choices?.[0]?.finish_reason === "length" && { truncated: true }) };
     },
   },
   // Anthropic Messages: system prompt at the top level, max_tokens required, no seed, content blocks in the reply.
@@ -217,10 +234,11 @@ const ADAPTERS: Record<ApiFormat, Adapter> = {
       },
     }),
     parse: (json, provider) => {
-      const j = json as { content?: { type: string; text?: string }[]; usage?: { input_tokens: number; output_tokens: number } };
+      const j = json as { content?: { type: string; text?: string }[]; stop_reason?: string; usage?: { input_tokens: number; output_tokens: number } };
       const text = (j.content ?? []).filter((b) => b.type === "text").map((b) => b.text ?? "").join("");
       if (text === "") throw new GenerationError(`Provider '${provider}': empty reply.`);
-      return { text, usage: j.usage && { inputTokens: j.usage.input_tokens, outputTokens: j.usage.output_tokens } };
+      const usage = j.usage && { inputTokens: j.usage.input_tokens, outputTokens: j.usage.output_tokens };
+      return { text, usage, ...(j.stop_reason === "max_tokens" && { truncated: true }) };
     },
   },
 };
