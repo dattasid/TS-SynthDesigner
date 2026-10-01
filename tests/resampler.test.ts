@@ -16,7 +16,7 @@ interface Job {
   bonus?: number | null;
 }
 
-const p = rootRefs<Job>();
+const p = rootRefs<Job>("job");
 const occuGen = new CategorySamplerGen({ values: ["doctor", "lawyer", "not_allowed_canada"] });
 const country = new CategorySamplerGen({ values: ["Canada", "Japan"] });
 

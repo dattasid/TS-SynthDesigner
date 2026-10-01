@@ -85,7 +85,7 @@ export class Plan<T> {
 
     const objects: ObjectSlot[] = [];
     const steps: Step[] = [];
-    flatten(gen, [], -1, "", objects, steps);
+    flatten(gen, [], -1, "", objects, steps, { name: gen.id, from: gen.id === undefined ? undefined : "the root tree's id" });
     return new Plan<T>(objects, sortSteps(steps), undefined);
   }
 
@@ -233,7 +233,13 @@ function groupByLevel(steps: readonly Step[]): Step[][] {
 }
 
 /** Walks a tree depth-first, collecting object slots (parents first) and steps (declaration order). */
-function flatten(tree: TreeGen<object>, path: Path, parent: number, key: string, objects: ObjectSlot[], steps: Step[]): void {
+/** The root's name for `rootRefs`: the root tree's id, else the first root ref's name; and where it came from. */
+interface RootName {
+  name: string | undefined;
+  from: string | undefined;
+}
+
+function flatten(tree: TreeGen<object>, path: Path, parent: number, key: string, objects: ObjectSlot[], steps: Step[], root: RootName): void {
   const fields = tree.fields as Record<string, AnyGen | undefined>;
   const names = Object.keys(fields).filter((n) => fields[n] !== undefined);
   const index = objects.length;
@@ -243,9 +249,9 @@ function flatten(tree: TreeGen<object>, path: Path, parent: number, key: string,
     const gen = fields[name]!;
     const fieldPath = [...path, name];
     if (gen instanceof TreeGen) {
-      flatten(gen, fieldPath, index, name, objects, steps);
+      flatten(gen, fieldPath, index, name, objects, steps, root);
     } else if (gen instanceof BoundGen) {
-      const inputs = Object.entries(gen.refs).map(([input, ref]) => [input, resolve(ref, path, fieldPath, input)] as const);
+      const inputs = Object.entries(gen.refs).map(([input, ref]) => [input, resolve(ref, path, fieldPath, input, root)] as const);
       steps.push({ path: fieldPath, gen: gen.gen, inputs, object: index, key: name });
     } else {
       checkBound(gen, `field '${show(fieldPath)}'`, (message) => {
@@ -257,7 +263,7 @@ function flatten(tree: TreeGen<object>, path: Path, parent: number, key: string,
 }
 
 /** The absolute path a ref points to, given the path of the object holding the field. */
-function resolve(ref: Ref<unknown>, objectPath: Path, fieldPath: Path, input: string): Path {
+function resolve(ref: Ref<unknown>, objectPath: Path, fieldPath: Path, input: string, root: RootName): Path {
   const target = refTarget(ref)!;
   switch (target.scope) {
     case "self":
@@ -267,8 +273,19 @@ function resolve(ref: Ref<unknown>, objectPath: Path, fieldPath: Path, input: st
         throw new ConfigError(`field '${show(fieldPath)}' reads '${showRef(ref)}' (input '${input}'), but its object is the root, so it has no parent.`);
       }
       return [...objectPath.slice(0, -1), ...target.path];
-    case "root":
+    case "root": {
+      const name = target.rootName!;
+      if (root.name === undefined) {
+        root.name = name;
+        root.from = `field '${show(fieldPath)}'`;
+      } else if (name !== root.name) {
+        throw new ConfigError(
+          `field '${show(fieldPath)}' reads '${showRef(ref)}' (input '${input}'), but the root is '${root.name}' (from ${root.from}). ` +
+            `rootRefs("${name}") was made for another root type: is this tree nested in another one? Use refs/parentRefs in nested trees.`,
+        );
+      }
       return target.path;
+    }
   }
 }
 

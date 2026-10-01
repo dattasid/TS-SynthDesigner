@@ -90,7 +90,7 @@ function checkNoBraces(text: string): void {
   const field = /^\{\{\s*([\w.]+)\s*\}\}$/.exec(snippet)?.[1];
   throw new ConfigError(
     `prompt: found ${JSON.stringify(snippet)}. {{ }} is DataDesigner/Jinja syntax and would be sent to the LLM as is. ` +
-      `Read fields with the prompt tag: prompt\`... \${p.${field ?? "field"}} ...\`, with p = rootRefs<YourType>().`,
+      `Read fields with the prompt tag: prompt\`... \${p.${field ?? "field"}} ...\`, with p = rootRefs<YourType>("yourType").`,
   );
 }
 

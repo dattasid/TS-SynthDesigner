@@ -108,7 +108,7 @@ describe("Plan", () => {
       b: Side;
     }
     const log: string[] = [];
-    const root = rootRefs<Doc>();
+    const root = rootRefs<Doc>("doc");
     const side = (reads: "a" | "b", fields: { x?: "y"; z?: "w" }) =>
       new TreeGen<Side>({
         fields: {
@@ -172,8 +172,8 @@ describe("Plan", () => {
       path: string;
       a: { b: { c: { scope: string } } };
     }
-    const p = rootRefs<Deep>();
-    expect(showRef(p.a.b.c.scope)).toBe("root.a.b.c.scope");
+    const p = rootRefs<Deep>("deep");
+    expect(showRef(p.a.b.c.scope)).toBe("deep.a.b.c.scope");
     expect(p.a.b).toBe(p.a.b); // the same ref object each time
 
     const log: string[] = [];
@@ -190,6 +190,44 @@ describe("Plan", () => {
     expect(Plan.compile(deep).order).toEqual(["a.b.c.scope", "path"]);
   });
 
+  it("rootRefs names its root: all root refs of a plan share the name, and it must match the root tree's id", () => {
+    interface Person {
+      name: string;
+      nick: string;
+    }
+    interface World {
+      name: string;
+      person: Person;
+    }
+    const p = rootRefs<Person>("person");
+    const nickGen = new ProbeGen<{ v: string }>([]).bind({ v: p.name });
+    const personGen = new TreeGen<Person>({ id: "person", fields: { name: new ProbeGen([]), nick: nickGen } });
+    expect(Plan.compile(personGen).order).toEqual(["name", "nick"]);
+    // Another rootRefs with the same name is interchangeable (e.g. made in a helper file).
+    const again = new TreeGen<Person>({
+      id: "person",
+      fields: { name: new ProbeGen([]), nick: new ProbeGen<{ v: string }>([]).bind({ v: rootRefs<Person>("person").name }) },
+    });
+    expect(Plan.compile(again).order).toEqual(["name", "nick"]);
+
+    // Nested in World: p.name would read world.name. Caught through the root tree's id...
+    const world = (id?: string) => new TreeGen<World>({ id, fields: { name: new ProbeGen([]), person: personGen } });
+    expect(() => Plan.compile(world("world"))).toThrow(
+      new ConfigError(
+        "field 'person.nick' reads 'person.name' (input 'v'), but the root is 'world' (from the root tree's id). " +
+          'rootRefs("person") was made for another root type: is this tree nested in another one? Use refs/parentRefs in nested trees.',
+      ),
+    );
+    // ...or through another root ref with a different name. Without either, it goes unnoticed.
+    const w = rootRefs<World>("world");
+    const loud = new TreeGen<World>({ fields: { name: new ProbeGen<{ v: string }>([]).bind({ v: w.person.nick }), person: personGen } });
+    expect(() => Plan.compile(loud)).toThrow(/field 'person\.nick' reads 'person\.name' .*but the root is 'world' \(from field 'name'\)/);
+    expect(Plan.compile(world()).order).toEqual(["name", "person.name", "person.nick"]);
+
+    expect(() => rootRefs<Person>("")).toThrow(/rootRefs needs the root's name/);
+    expect(() => rootRefs<Person>("my person")).toThrow(/an identifier like "person"/);
+  });
+
   it("async Gens: a level's calls run together, and the data does not depend on timing or batch size", async () => {
     interface Row {
       topic: string;
@@ -198,7 +236,7 @@ describe("Plan", () => {
       both: string;
       n: number;
     }
-    const p = rootRefs<Row>();
+    const p = rootRefs<Row>("row");
     let inFlight = 0;
     let maxInFlight = 0;
     // Stands in for an LLM call: random latency, so calls finish in a different order on every run.

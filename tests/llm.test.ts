@@ -139,7 +139,7 @@ interface Person {
   bioLength: number;
 }
 
-const p = rootRefs<Person>();
+const p = rootRefs<Person>("person");
 
 const personGen = (bio: LLMTextGen) =>
   new TreeGen<Person>({
@@ -242,7 +242,7 @@ describe("LLMTextGen", () => {
     const { records } = await preview({ gen: joke, numRecords: 2, providers: { mock }, models: { fast: { provider: "mock", model: "m" } } });
     expect(records).toEqual(["Why did the chicken...", "Why did the chicken..."]);
 
-    expect(() => `Bio for ${p.name}`).toThrow(/root\.name is a ref, not a value.*use the prompt`\.\.\.` tag/);
+    expect(() => `Bio for ${p.name}`).toThrow(/person\.name is a ref, not a value.*use the prompt`\.\.\.` tag/);
   });
 
   it("{{ }} (DataDesigner's Jinja syntax) is an error, in any prompt form", () => {

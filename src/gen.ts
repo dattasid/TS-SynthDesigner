@@ -13,6 +13,8 @@ export type RefScope = "self" | "parent" | "root";
 export interface RefTarget {
   readonly scope: RefScope;
   readonly path: readonly string[];
+  /** For `root` refs: the name given to `rootRefs`, e.g. "person". */
+  readonly rootName?: string;
 }
 
 /** Key of a ref's runtime data. A symbol, so every plain name stays free for fields. */
@@ -43,14 +45,14 @@ export function refTarget(value: unknown): RefTarget | undefined {
   return (value as { [REF_TARGET]?: RefTarget })[REF_TARGET];
 }
 
-/** For error messages: `root.education.city`. */
+/** For error messages: `person.education.city` (a root ref, by its name), `self.city`, `parent.country`. */
 export function showRef(ref: unknown): string {
   const target = refTarget(ref);
-  return target ? [target.scope, ...target.path].join(".") : String(ref);
+  return target ? [target.rootName ?? target.scope, ...target.path].join(".") : String(ref);
 }
 
-function makeRef(scope: RefScope, path: readonly string[]): unknown {
-  const target: RefTarget = Object.freeze({ scope, path: Object.freeze([...path]) });
+function makeRef(scope: RefScope, path: readonly string[], rootName?: string): unknown {
+  const target: RefTarget = Object.freeze({ scope, path: Object.freeze([...path]), ...(rootName !== undefined && { rootName }) });
   const children = new Map<string, unknown>();
   // Each property access returns the ref one key deeper. Only refs are made here, while trees are
   // set up; the plan resolves them to paths once, so the Proxy costs nothing per record.
@@ -63,7 +65,7 @@ function makeRef(scope: RefScope, path: readonly string[]): unknown {
       };
       if (typeof key === "symbol") return undefined;
       let child = children.get(key);
-      if (!child) children.set(key, (child = makeRef(scope, [...path, key])));
+      if (!child) children.set(key, (child = makeRef(scope, [...path, key], rootName)));
       return child;
     },
     set() {
@@ -92,16 +94,23 @@ export function parentRefs<T>(): RefTree<T> {
  * Refs into `T`, the top-level record, from any depth. With a single root type, using these
  * everywhere is simplest: every ref is a path from the top.
  *
- *     const p = rootRefs<Person>();
+ *     const p = rootRefs<Person>("person");
  *     univCity: cityGen.bind({ category: p.country })   // inside person.education
  *
- * Create one `rootRefs` per project, for the top-level type. `<T>` is trusted, not checked: refs are
- * made before the tree, so nothing ties `T` to the tree that is finally the root. A tree whose Gens use
- * `rootRefs<Person>()` reads the wrong fields if it is later nested in another tree (the plan only
- * catches paths that do not exist there). For trees meant to be nested, use `refs` / `parentRefs`.
+ * The name stands for the root at runtime, where `<T>` is gone: errors show `person.country`, and the
+ * plan checks it. All root refs of one plan must have the same name, and if the root tree has an `id`,
+ * that name. Give the root tree `id: "person"` to catch a tree using these refs being nested in
+ * another tree, where they would read that tree's fields.
+ *
+ * Create one `rootRefs` per project, for the top-level type (refs with the same name are
+ * interchangeable, so helpers in other files can make their own). `<T>` itself is trusted: nothing
+ * ties it to the name. For trees meant to be nested, use `refs` / `parentRefs`.
  */
-export function rootRefs<T>(): RefTree<T> {
-  return makeRef("root", []) as RefTree<T>;
+export function rootRefs<T>(name: string): RefTree<T> {
+  if (typeof name !== "string" || !/^[A-Za-z_$][\w$]*$/.test(name)) {
+    throw new ConfigError(`rootRefs needs the root's name, an identifier like "person"; got ${JSON.stringify(name)}.`);
+  }
+  return makeRef("root", [], name) as RefTree<T>;
 }
 
 /** One `Ref<V>` per input `V`: what `bind()` takes. */
@@ -207,7 +216,7 @@ export class BoundGen<Out> extends BaseGen<Out> {
     }
     for (const [input, ref] of Object.entries(refs)) {
       const target = refTarget(ref);
-      this.check(target !== undefined, `input '${input}' must be a ref, e.g. rootRefs<Person>().country.`);
+      this.check(target !== undefined, `input '${input}' must be a ref, e.g. rootRefs<Person>("person").country.`);
       this.check(target!.path.length > 0, `input '${input}' is a whole ${target!.scope} object; bind a field of it instead.`);
     }
   }

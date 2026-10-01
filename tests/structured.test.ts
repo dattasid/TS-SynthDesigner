@@ -27,7 +27,7 @@ interface Person {
   name: string;
   backStory: BackStory;
 }
-const p = rootRefs<Person>();
+const p = rootRefs<Person>("person");
 
 const story = (happiness: number) => JSON.stringify({ childhood: "By the sea.", happiness, mood: "calm" });
 

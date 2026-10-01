@@ -89,7 +89,7 @@ interface Student {
 
 it("reading a value from the top of the record", async () => {
   // student.education.univCity reads student.country. The plan generates country first.
-  const root = rootRefs<Student>();
+  const root = rootRefs<Student>("student");
   const cityGen = new SubCategorySamplerGen({ values: { Canada: ["Toronto", "Montreal"], Japan: ["Kyoto"] } });
 
   const student = new TreeGen<Student>({
@@ -115,7 +115,7 @@ interface Worker {
 }
 
 it("custom Gens: plain functions, few types", async () => {
-  const p = rootRefs<Worker>();
+  const p = rootRefs<Worker>("worker");
 
   // Reusable: type the parameter once; the output type is inferred from the returns (TypeScript
   // keeps the returned literals, which still fit the string field).
@@ -157,7 +157,7 @@ it("an LLM field", async () => {
     occupation: string;
     bio: string;
   }
-  const p = rootRefs<Profile>();
+  const p = rootRefs<Profile>("profile");
   const profile = new TreeGen<Profile>({
     fields: {
       name: new CategorySamplerGen({ values: ["Ada", "Linus"] }),
@@ -190,7 +190,7 @@ it("an LLM field with a JSON reply", async () => {
     name: string;
     backStory: Infer<typeof backStory>;
   }
-  const p = rootRefs<Profile>();
+  const p = rootRefs<Profile>("profile");
   const profile = new TreeGen<Profile>({
     fields: {
       name: new CategorySamplerGen({ values: ["Ada", "Linus"] }),
@@ -259,10 +259,10 @@ export function compileErrors(): void {
   TreeGen.builder<Pet>().field({ name: "species", gen: heightCm });
 
   // @ts-expect-error root refs are typed too: Student has no 'countryy'. Refs are plain property access, any depth.
-  rootRefs<Student>().countryy;
-  rootRefs<Student>().education.univCity; // fine
+  rootRefs<Student>("student").countryy;
+  rootRefs<Student>("student").education.univCity; // fine
 
-  const w = rootRefs<Worker>();
+  const w = rootRefs<Worker>("worker");
   CustomGen.bound({
     inputs: { age: w.age },
     // @ts-expect-error age is a number (from the ref), so it has no toUpperCase.
