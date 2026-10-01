@@ -184,7 +184,7 @@ function guidanceText(schema: ObjectSchema<any>, how: SchemaInPrompt): string {
     case "jsonSchemaDetailed":
       return `\n\nReply with only a JSON object that matches this JSON Schema (no other text):\n${JSON.stringify(schema.toJSONSchema(), null, 2)}`;
     case "notesOnly":
-      return `\n\nReply with a JSON object with these fields:\n${schema.notes().join("\n")}`;
+      return `\n\nReply with only a JSON object with these fields (no other text):\n${schema.notes().join("\n")}`;
     case "none":
       return "";
   }

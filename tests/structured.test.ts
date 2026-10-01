@@ -63,7 +63,7 @@ describe("LLMStructuredGen", () => {
     );
     const notes = run(() => story(7), { schemaInPrompt: "notesOnly" });
     await notes.result;
-    expect(notes.mock.requests[0]!.prompt).toMatch(/\.\n\nReply with a JSON object with these fields:\n- childhood: two sentences\n/);
+    expect(notes.mock.requests[0]!.prompt).toMatch(/\.\n\nReply with only a JSON object with these fields \(no other text\):\n- childhood: two sentences\n/);
     const none = run(() => story(7), { schemaInPrompt: "none" });
     await none.result;
     expect(none.mock.requests[0]!.prompt).toMatch(/^Invent a backstory for \w+\.$/);
