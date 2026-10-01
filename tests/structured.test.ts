@@ -69,11 +69,19 @@ describe("LLMStructuredGen", () => {
     expect(none.mock.requests[0]!.prompt).toMatch(/^Invent a backstory for \w+\.$/);
   });
 
-  it("accepts a ```json fence, even without its closing fence; nothing else", () => {
-    expect(parseJsonReply('```json\n{"a": 1}\n```')).toEqual({ ok: true, value: { a: 1 } });
-    expect(parseJsonReply('```\n{"a": 1}')).toEqual({ ok: true, value: { a: 1 } });
-    expect(parseJsonReply('  {"a": 1}\n')).toEqual({ ok: true, value: { a: 1 } });
+  it("accepts plain JSON, or one fenced block with any text around it; nothing else", () => {
+    const a1 = { ok: true, value: { a: 1 } };
+    expect(parseJsonReply('  {"a": 1}\n')).toEqual(a1);
+    expect(parseJsonReply('```json\n{"a": 1}\n```')).toEqual(a1);
+    expect(parseJsonReply('```\n{"a": 1}')).toEqual(a1); // the reply just ends
+    expect(parseJsonReply('```\n{"a": 1}```')).toEqual(a1);
+    // Seen from llama-3.1-8b: a line before the block, an explanation after it.
+    expect(parseJsonReply('Here is the corrected JSON object:\n\n```json\n{"a": 1}\n```\n\nIn this backstory, ...')).toEqual(a1);
+    expect(parseJsonReply('Here it is:\n```\n{"a": "x ``` y"}')).toEqual({ ok: true, value: { a: "x ``` y" } }); // not at a line start
+
     expect(parseJsonReply('Here it is: {"a": 1}')).toMatchObject({ ok: false, problem: expect.stringMatching(/^the reply is not plain JSON/) });
+    expect(parseJsonReply('```json\n{"a": 1}\n```\nor:\n```json\n{"a": 2}\n```')).toEqual({ ok: false, problem: "the reply has 2 fenced blocks; expected one" });
+    expect(parseJsonReply('```json\n{"a": 1}\n```\nor:\n```json\n{"a": 2}')).toEqual({ ok: false, problem: "the reply has 2 fenced blocks; expected one" });
     expect(parseJsonReply('{"a": 1, // one\n}')).toMatchObject({ ok: false });
   });
 

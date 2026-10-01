@@ -199,13 +199,17 @@ function retryText(reply: string, issues: readonly string[]): string {
 }
 
 /**
- * The JSON in a reply. Lenient only about a Markdown fence around it (```json ... ```), whose closing
- * fence may be missing. Anything else (prose around the JSON, comments) is a problem for the retry.
+ * The JSON in a reply: the whole reply, or the one Markdown fenced block in it (```json ... ```).
+ * Text before and after the block is ignored ("Here is the JSON:"); a missing closing fence is fine
+ * (the reply just ends). Two blocks, prose around unfenced JSON, or comments are problems for the retry.
  */
 export function parseJsonReply(text: string): { ok: true; value: unknown } | { ok: false; problem: string } {
   let body = text.trim();
-  const fence = /^```[\w-]*[ \t]*\r?\n/.exec(body);
-  if (fence) body = body.slice(fence[0].length).replace(/\r?\n?```$/, "").trim();
+  // A JSON string cannot hold a line break, so a line starting with ``` is always a fence.
+  const fences = [...body.matchAll(/^```.*$/gm)];
+  if (fences.length > 2) return { ok: false, problem: `the reply has ${Math.ceil(fences.length / 2)} fenced blocks; expected one` };
+  const [open, close] = fences;
+  if (open) body = body.slice(open.index + open[0].length, close?.index).replace(/```$/, "").trim();
   try {
     return { ok: true, value: JSON.parse(body) };
   } catch (error) {
