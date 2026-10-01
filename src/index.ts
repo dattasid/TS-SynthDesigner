@@ -39,6 +39,22 @@ export {
   type OnExhausted,
   type ResampledValue,
 } from "./resampler";
+export {
+  ArraySchema,
+  BooleanSchema,
+  EnumSchema,
+  NumberSchema,
+  ObjectSchema,
+  OptionalSchema,
+  s,
+  Schema,
+  StringSchema,
+  type ArraySchemaParams,
+  type DescribedParams,
+  type Infer,
+  type NumberSchemaParams,
+  type ObjectValue,
+} from "./schema";
 export { preview, previewSync, type PreviewParams, type PreviewResults } from "./preview";
 export { MersenneTwister, type Rng } from "./rng";
 export {
