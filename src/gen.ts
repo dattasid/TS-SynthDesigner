@@ -94,6 +94,11 @@ export function parentRefs<T>(): RefTree<T> {
  *
  *     const p = rootRefs<Person>();
  *     univCity: cityGen.bind({ category: p.country })   // inside person.education
+ *
+ * Create one `rootRefs` per project, for the top-level type. `<T>` is trusted, not checked: refs are
+ * made before the tree, so nothing ties `T` to the tree that is finally the root. A tree whose Gens use
+ * `rootRefs<Person>()` reads the wrong fields if it is later nested in another tree (the plan only
+ * catches paths that do not exist there). For trees meant to be nested, use `refs` / `parentRefs`.
  */
 export function rootRefs<T>(): RefTree<T> {
   return makeRef("root", []) as RefTree<T>;
