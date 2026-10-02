@@ -8,6 +8,7 @@ import {
   preview,
   prompt,
   Provider,
+  reasoningOf,
   rootRefs,
   s,
   TreeGen,
@@ -99,6 +100,20 @@ describe("LLMStructuredGen", () => {
         "\n\nIt had these problems:\n- happiness: expected an integer from 1 to 10, got 12\n\nReply again with the corrected JSON only.",
     );
     expect(retry!.seed).toBe(first!.seed! + 1);
+  });
+
+  it("reasoningOf gives the reasoning behind the accepted attempt", async () => {
+    let n = 0;
+    const mock = new MockProvider({ respond: () => (n++ === 0 ? { text: "{}", reasoning: "first try" } : { text: story(6), reasoning: "second try" }) });
+    const gen = new TreeGen<Person & { why?: string }>({
+      fields: {
+        name: new CategorySamplerGen({ values: ["Ana"] }),
+        backStory: new LLMStructuredGen({ model: "fast", prompt: prompt`Invent a backstory for ${p.name}.`, schema: backStory }),
+        why: reasoningOf(p.backStory),
+      },
+    });
+    const { records } = await preview({ gen, numRecords: 1, providers: { mock }, models: { fast: { provider: "mock", model: "m" } } });
+    expect(records[0]!.why).toBe("second try");
   });
 
   it("after maxAttempts: fails naming the problems, or uses a copy of defaultValue", async () => {

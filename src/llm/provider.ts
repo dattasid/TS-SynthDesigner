@@ -23,6 +23,12 @@ export interface Completion {
   usage?: { inputTokens: number; outputTokens: number };
   /** The reply stopped at the token limit (`maxTokens`), so it is incomplete. */
   truncated?: boolean;
+  /**
+   * The model's reasoning, where the API sends it apart from the reply: `reasoning` (OpenRouter) or
+   * `reasoning_content` (DeepSeek, vLLM) in the OpenAI format, `thinking` blocks from Anthropic (with
+   * thinking turned on). OpenAI itself sends none.
+   */
+  reasoning?: string;
 }
 
 /** Anything that answers completion requests: a real `Provider`, or a `MockProvider` in tests. */
@@ -213,13 +219,15 @@ const ADAPTERS: Record<ApiFormat, Adapter> = {
     }),
     parse: (json, provider) => {
       const j = json as {
-        choices?: { message?: { content?: string | null }; finish_reason?: string }[];
+        choices?: { message?: { content?: string | null; reasoning?: unknown; reasoning_content?: unknown }; finish_reason?: string }[];
         usage?: { prompt_tokens: number; completion_tokens: number };
       };
-      const text = j.choices?.[0]?.message?.content;
+      const message = j.choices?.[0]?.message;
+      const text = message?.content;
       if (typeof text !== "string" || text === "") throw new GenerationError(`Provider '${provider}': empty reply.`);
       const usage = j.usage && { inputTokens: j.usage.prompt_tokens, outputTokens: j.usage.completion_tokens };
-      return { text, usage, ...(j.choices?.[0]?.finish_reason === "length" && { truncated: true }) };
+      const reasoning = [message?.reasoning, message?.reasoning_content].find((r): r is string => typeof r === "string" && r !== "");
+      return { text, usage, ...(j.choices?.[0]?.finish_reason === "length" && { truncated: true }), ...(reasoning && { reasoning }) };
     },
   },
   // Anthropic Messages: system prompt at the top level, max_tokens required, no seed, content blocks in the reply.
@@ -234,11 +242,14 @@ const ADAPTERS: Record<ApiFormat, Adapter> = {
       },
     }),
     parse: (json, provider) => {
-      const j = json as { content?: { type: string; text?: string }[]; stop_reason?: string; usage?: { input_tokens: number; output_tokens: number } };
-      const text = (j.content ?? []).filter((b) => b.type === "text").map((b) => b.text ?? "").join("");
+      type Block = { type: string; text?: string; thinking?: string };
+      const j = json as { content?: Block[]; stop_reason?: string; usage?: { input_tokens: number; output_tokens: number } };
+      const join = (type: string, key: "text" | "thinking") => (j.content ?? []).filter((b) => b.type === type).map((b) => b[key] ?? "").join("");
+      const text = join("text", "text");
       if (text === "") throw new GenerationError(`Provider '${provider}': empty reply.`);
       const usage = j.usage && { inputTokens: j.usage.input_tokens, outputTokens: j.usage.output_tokens };
-      return { text, usage, ...(j.stop_reason === "max_tokens" && { truncated: true }) };
+      const reasoning = join("thinking", "thinking");
+      return { text, usage, ...(j.stop_reason === "max_tokens" && { truncated: true }), ...(reasoning && { reasoning }) };
     },
   },
 };

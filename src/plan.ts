@@ -1,6 +1,6 @@
 import type { Context } from "./context";
 import { ConfigError, GenerationError } from "./errors";
-import { BoundGen, refTarget, showRef, type Gen, type MaybePromise, type Ref } from "./gen";
+import { BoundGen, refTarget, showRef, type Gen, type MaybePromise, type Ref, type Trace } from "./gen";
 import { checkBound, TreeGen } from "./tree";
 
 type AnyGen = Gen<unknown, any>;
@@ -17,15 +17,24 @@ interface ObjectSlot {
   key: string;
 }
 
+/** An input of a step: its name, and the absolute path of the value (or, for `traceOf`, the trace) that feeds it. */
+interface Input {
+  name: string;
+  path: Path;
+  /** For `traceOf` inputs: the producer's trace slot (set after sorting). -1 for values. */
+  trace: number;
+}
+
 /** A field with a Gen that produces a value (anything but a nested TreeGen). */
 interface Step {
   path: Path;
   gen: AnyGen;
-  /** Input name -> absolute path of the value that feeds it. */
-  inputs: readonly (readonly [string, Path])[];
+  inputs: readonly Input[];
   /** Index of the object the value is stored in. */
   object: number;
   key: string;
+  /** Where this step's trace is kept per row, if some field reads it with `traceOf`; else -1. */
+  traceSlot: number;
 }
 
 const show = (path: Path) => (path.length === 0 ? "<root>" : path.join("."));
@@ -60,10 +69,13 @@ export class Plan<T> {
   /** The steps grouped by level (see `levels()`), each level in run order. */
   private readonly stepLevels: readonly (readonly Step[])[];
   private readonly single: AnyGen | undefined;
+  /** How many steps are read with `traceOf`. */
+  private readonly traceCount: number;
 
   private constructor(objects: ObjectSlot[], steps: Step[], single: AnyGen | undefined) {
     this.objects = objects;
     this.steps = steps;
+    this.traceCount = assignTraceSlots(steps);
     this.stepLevels = groupByLevel(steps);
     this.single = single;
     this.order = single ? ["<root>"] : steps.map((s) => show(s.path));
@@ -95,7 +107,10 @@ export class Plan<T> {
    */
   graph(): { path: string; reads: Record<string, string> }[] {
     if (this.single) return [{ path: "<root>", reads: {} }];
-    return this.steps.map((s) => ({ path: show(s.path), reads: Object.fromEntries(s.inputs.map(([i, p]) => [i, show(p)])) }));
+    return this.steps.map((s) => ({
+      path: show(s.path),
+      reads: Object.fromEntries(s.inputs.map((i) => [i.name, i.trace < 0 ? show(i.path) : `traceOf(${show(i.path)})`])),
+    }));
   }
 
   /**
@@ -170,7 +185,9 @@ export class Plan<T> {
     }
 
     const rows: Record<string, unknown>[][] = [];
+    const traces: Trace[][] = [];
     for (let r = 0; r < count; r++) {
+      if (this.traceCount > 0) traces.push(Array.from({ length: this.traceCount }, () => ({})));
       const objects: Record<string, unknown>[] = [];
       for (const slot of this.objects) {
         const obj = { ...slot.template } as Record<string, unknown>;
@@ -179,26 +196,30 @@ export class Plan<T> {
       }
       rows.push(objects);
     }
-    return this.runLevels(rows, ctx, 0, sync);
+    return this.runLevels(rows, traces, ctx, 0, sync);
   }
 
-  /** Runs levels from `from` on; at the first level that started Promises, awaits them and continues. */
-  private runLevels(rows: Record<string, unknown>[][], ctx: Context, from: number, sync: boolean): MaybePromise<T[]> {
+  /**
+   * Runs levels from `from` on; at the first level that started Promises, awaits them and continues.
+   * `traces[row][slot]` holds the traces of the traced steps, filled through `ctx.trace()`.
+   */
+  private runLevels(rows: Record<string, unknown>[][], traces: Trace[][], ctx: Context, from: number, sync: boolean): MaybePromise<T[]> {
     for (let level = from; level < this.stepLevels.length; level++) {
       const pending: Promise<void>[] = [];
       for (const step of this.stepLevels[level]!) {
         const stepCtx = contextFor(ctx, step.path);
-        for (const objects of rows) {
+        for (let r = 0; r < rows.length; r++) {
+          const objects = rows[r]!;
           const inputs: Record<string, unknown> = {};
-          for (const [name, path] of step.inputs) inputs[name] = read(objects[0]!, path);
-          const value = step.gen.generate(inputs, stepCtx);
+          for (const { name, path, trace } of step.inputs) inputs[name] = trace < 0 ? read(objects[0]!, path) : traces[r]![trace];
+          const value = step.gen.generate(inputs, step.traceSlot < 0 ? stepCtx : stepCtx.withTrace(traces[r]![step.traceSlot]!));
           const target = objects[step.object]!;
           if (!isPromise(value)) target[step.key] = value;
           else if (sync) asyncError(show(step.path), [value, ...pending]);
           else pending.push(value.then((v) => void (target[step.key] = v)));
         }
       }
-      if (pending.length > 0) return Promise.all(pending).then(() => this.runLevels(rows, ctx, level + 1, sync));
+      if (pending.length > 0) return Promise.all(pending).then(() => this.runLevels(rows, traces, ctx, level + 1, sync));
     }
     return rows.map((objects) => objects[0] as T);
   }
@@ -223,7 +244,7 @@ function groupByLevel(steps: readonly Step[]): Step[][] {
   const levels: Step[][] = [];
   for (const step of steps) {
     let level = 0;
-    for (const [, path] of step.inputs) {
+    for (const { path } of step.inputs) {
       for (const [producer, l] of levelOf) if (startsWith(producer.path, path)) level = Math.max(level, l + 1);
     }
     levelOf.set(step, level);
@@ -251,13 +272,17 @@ function flatten(tree: TreeGen<object>, path: Path, parent: number, key: string,
     if (gen instanceof TreeGen) {
       flatten(gen, fieldPath, index, name, objects, steps, root);
     } else if (gen instanceof BoundGen) {
-      const inputs = Object.entries(gen.refs).map(([input, ref]) => [input, resolve(ref, path, fieldPath, input, root)] as const);
-      steps.push({ path: fieldPath, gen: gen.gen, inputs, object: index, key: name });
+      const inputs = Object.entries(gen.refs).map(([input, ref]) => ({
+        name: input,
+        path: resolve(ref, path, fieldPath, input, root),
+        trace: refTarget(ref)!.trace ? 0 : -1,
+      }));
+      steps.push({ path: fieldPath, gen: gen.gen, inputs, object: index, key: name, traceSlot: -1 });
     } else {
       checkBound(gen, `field '${show(fieldPath)}'`, (message) => {
         throw new ConfigError(message);
       });
-      steps.push({ path: fieldPath, gen, inputs: [], object: index, key: name });
+      steps.push({ path: fieldPath, gen, inputs: [], object: index, key: name, traceSlot: -1 });
     }
   }
 }
@@ -296,10 +321,13 @@ function resolve(ref: Ref<unknown>, objectPath: Path, fieldPath: Path, input: st
 function sortSteps(steps: Step[]): Step[] {
   const dependsOn = steps.map((step) => {
     const deps = new Set<number>();
-    for (const [input, path] of step.inputs) {
+    for (const { name: input, path, trace } of step.inputs) {
       const producers = steps.flatMap((s, i) => (startsWith(s.path, path) ? [i] : []));
       if (producers.length === 0) {
         throw new ConfigError(`field '${show(step.path)}' reads '${show(path)}' (input '${input}'), which no field generates.`);
+      }
+      if (trace >= 0 && !(producers.length === 1 && steps[producers[0]!]!.path.length === path.length)) {
+        throw new ConfigError(`field '${show(step.path)}' reads traceOf(${show(path)}) (input '${input}'), which is an object; traceOf reads one field.`);
       }
       if (producers.includes(steps.indexOf(step))) {
         throw new ConfigError(`field '${show(step.path)}' reads '${show(path)}' (input '${input}'), which contains the field itself.`);
@@ -321,6 +349,23 @@ function sortSteps(steps: Step[]): Step[] {
     done.add(ready);
   }
   return order;
+}
+
+/**
+ * Gives each step read with `traceOf` a trace slot, and points the reading inputs at it. Returns the
+ * number of slots. (Input `trace` is 0 for `traceOf` inputs until here.)
+ */
+function assignTraceSlots(steps: Step[]): number {
+  let count = 0;
+  for (const step of steps) {
+    for (const input of step.inputs) {
+      if (input.trace < 0) continue;
+      const producer = steps.find((s) => s.path.length === input.path.length && startsWith(s.path, input.path))!;
+      if (producer.traceSlot < 0) producer.traceSlot = count++;
+      input.trace = producer.traceSlot;
+    }
+  }
+  return count;
 }
 
 function read(root: Record<string, unknown>, path: Path): unknown {

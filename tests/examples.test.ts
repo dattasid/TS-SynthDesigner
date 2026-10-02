@@ -13,6 +13,7 @@ import {
   NumberSamplerGen,
   preview,
   prompt,
+  reasoningOf,
   refs,
   rootRefs,
   s,
@@ -213,6 +214,27 @@ it("an LLM field with a JSON reply", async () => {
   console.table(records.map(({ name, backStory }) => ({ name, ...backStory })));
   console.log(mock.requests[0]!.prompt); // the prompt with the shape and field notes added
   expectTypeOf(records[0]!.backStory.mood).toEqualTypeOf<"calm" | "anxious">();
+});
+
+it("an LLM's reasoning in its own field", async () => {
+  interface Answer {
+    question: string;
+    answer: string;
+    answerReasoning?: string; // optional: only reasoning models on some providers send it
+  }
+  const a = rootRefs<Answer>("answer");
+  const qa = new TreeGen<Answer>({
+    fields: {
+      question: new CategorySamplerGen({ values: ["Why is the sky blue?", "Why is grass green?"] }),
+      answer: new LLMTextGen({ model: "thinker", prompt: prompt`Answer in one line: ${a.question}` }),
+      answerReasoning: reasoningOf(a.answer), // works for LLMStructuredGen fields too
+    },
+  });
+
+  // For real: providers: { openRouter: Provider.openRouter() }, models: { thinker: { provider: "openRouter", model: "qwen/qwen3.8-flash" } }
+  const mock = new MockProvider({ respond: () => ({ text: "Light scatters.", reasoning: "Rayleigh scattering..." }) });
+  const { records } = await preview({ gen: qa, numRecords: 2, seed: 1, providers: { mock }, models: { thinker: { provider: "mock", model: "m" } } });
+  console.table(records);
 });
 
 it("writing records to a JSONL file", async () => {

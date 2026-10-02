@@ -1,4 +1,5 @@
 import { ConfigError } from "./errors";
+import type { Trace } from "./gen";
 import type { LLMProvider } from "./llm/provider";
 import { MersenneTwister, type Rng } from "./rng";
 
@@ -43,13 +44,13 @@ interface LLMSetup {
  * So adding, removing or reordering a field never changes the values of the other fields.
  */
 export class Context {
-  private readonly children = new Map<string, Context>();
-
   private constructor(
     readonly rng: Rng,
     readonly seed: readonly number[],
     readonly path: readonly string[],
     private readonly llm: LLMSetup,
+    private readonly children = new Map<string, Context>(),
+    private readonly traceSink?: Trace,
   ) {}
 
   static create({ seed, providers = {}, models = {} }: ContextParams = {}): Context {
@@ -75,6 +76,19 @@ export class Context {
       this.children.set(name, c);
     }
     return c;
+  }
+
+  /**
+   * Notes something about the value being made, e.g. `ctx.trace({ reasoning })`, for fields reading
+   * this one with `traceOf`. A no-op unless some field does.
+   */
+  trace(entries: Trace): void {
+    if (this.traceSink) Object.assign(this.traceSink, entries);
+  }
+
+  /** This context, with `trace()` writing into `sink`. The plan makes one per row for traced fields. */
+  withTrace(sink: Trace): Context {
+    return new Context(this.rng, this.seed, this.path, this.llm, this.children, sink);
   }
 
   get pathString(): string {

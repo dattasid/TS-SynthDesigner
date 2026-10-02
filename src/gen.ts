@@ -15,6 +15,8 @@ export interface RefTarget {
   readonly path: readonly string[];
   /** For `root` refs: the name given to `rootRefs`, e.g. "person". */
   readonly rootName?: string;
+  /** Made by `traceOf`: the ref reads the field's trace instead of its value. */
+  readonly trace?: true;
 }
 
 /** Key of a ref's runtime data. A symbol, so every plain name stays free for fields. */
@@ -48,7 +50,9 @@ export function refTarget(value: unknown): RefTarget | undefined {
 /** For error messages: `person.education.city` (a root ref, by its name), `self.city`, `parent.country`. */
 export function showRef(ref: unknown): string {
   const target = refTarget(ref);
-  return target ? [target.rootName ?? target.scope, ...target.path].join(".") : String(ref);
+  if (!target) return String(ref);
+  const path = [target.rootName ?? target.scope, ...target.path].join(".");
+  return target.trace ? `traceOf(${path})` : path;
 }
 
 function makeRef(scope: RefScope, path: readonly string[], rootName?: string): unknown {
@@ -111,6 +115,31 @@ export function rootRefs<T>(name: string): RefTree<T> {
     throw new ConfigError(`rootRefs needs the root's name, an identifier like "person"; got ${JSON.stringify(name)}.`);
   }
   return makeRef("root", [], name) as RefTree<T>;
+}
+
+/**
+ * What a Gen noted about a value while making it, besides the value: e.g. the reasoning an LLM sent
+ * separately from its reply. Read by other fields through `traceOf(ref)`.
+ */
+export interface Trace {
+  /** The model's reasoning (thinking) text, from providers that send it apart from the reply. */
+  reasoning?: string;
+}
+
+/**
+ * A ref to a field's trace instead of its value: what its Gen noted while making it (see `Trace`).
+ * Reading it orders the reader after the field, like any ref. A Gen that notes nothing gives `{}`.
+ *
+ *     bioReasoning: CustomGen.bound({ inputs: { t: traceOf(p.bio) }, fn: ({ t }) => t.reasoning })
+ *
+ * (`reasoningOf(p.bio)` is that Gen.) Only the Gens of traced fields record anything, so tracing costs
+ * nothing elsewhere.
+ */
+export function traceOf(ref: Ref<unknown>): Ref<Trace> {
+  const target = refTarget(ref);
+  if (!target || target.trace) throw new ConfigError(`traceOf takes a ref to a field, e.g. traceOf(p.bio); got ${showRef(ref)}.`);
+  if (target.path.length === 0) throw new ConfigError(`traceOf takes a ref to a field, not a whole ${target.scope} object.`);
+  return Object.freeze({ [REF_TARGET]: Object.freeze({ ...target, trace: true as const }) }) as Ref<Trace>;
 }
 
 /** One `Ref<V>` per input `V`: what `bind()` takes. */

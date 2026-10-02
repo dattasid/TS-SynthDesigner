@@ -56,7 +56,8 @@ export interface LLMStructuredGenParams<T> {
  *
  * Each reply is parsed (a ```json fence is allowed, even without its closing fence) and validated.
  * An invalid reply is retried, with the reply and its problems added to the prompt. A reply cut off
- * at `maxTokens` fails at once, since a retry would be cut off too.
+ * at `maxTokens` fails at once, since a retry would be cut off too. The reasoning behind the accepted
+ * reply, from providers that send it separately, can go in another field with `reasoningOf(p.backStory)`.
  */
 export class LLMStructuredGen<T> extends BoundGen<T> {
   constructor(params: LLMStructuredGenParams<T>) {
@@ -163,7 +164,10 @@ class LLMStructuredCall<T> extends BaseGen<T, Record<string, unknown>> {
       }
       const parsed = parseJsonReply(completion.text);
       const result = parsed.ok ? this.schema.validate(parsed.value) : { ok: false as const, issues: [parsed.problem] };
-      if (result.ok) return result.value as T;
+      if (result.ok) {
+        if (completion.reasoning) ctx.trace({ reasoning: completion.reasoning });
+        return result.value as T;
+      }
       if (n + 1 >= this.maxAttempts) {
         return failed(`no valid reply in ${this.maxAttempts} attempt(s). Last problems: ${result.issues.join("; ")}.`);
       }

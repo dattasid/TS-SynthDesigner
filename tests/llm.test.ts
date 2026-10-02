@@ -15,7 +15,10 @@ import {
   preview,
   prompt,
   Provider,
+  reasoningOf,
+  refs,
   rootRefs,
+  traceOf,
   TreeGen,
 } from "../src/index";
 import { liveSetup, skipLive } from "./live";
@@ -94,6 +97,14 @@ describe("Provider", () => {
     expect(await Provider.openai({ apiKey: { env: "TDD_TEST_KEY" }, fetch: cut.fn }).complete({ model: "m", prompt: "Hi" })).toMatchObject({ truncated: true });
     const cutA = fakeFetch(() => ({ status: 200, body: { content: [{ type: "text", text: "Hel" }], stop_reason: "max_tokens" } }));
     expect(await Provider.anthropic({ apiKey: { env: "TDD_TEST_KEY" }, fetch: cutA.fn }).complete({ model: "m", prompt: "Hi" })).toMatchObject({ truncated: true });
+
+    // Reasoning sent apart from the reply: OpenRouter's `reasoning`, DeepSeek/vLLM's `reasoning_content`, Anthropic's thinking blocks.
+    for (const key of ["reasoning", "reasoning_content"]) {
+      const r = fakeFetch(() => ({ status: 200, body: { choices: [{ message: { content: "Hi", [key]: "They said hi." } }] } }));
+      expect(await Provider.openRouter({ apiKey: { env: "TDD_TEST_KEY" }, fetch: r.fn }).complete({ model: "m", prompt: "Hi" })).toMatchObject({ reasoning: "They said hi." });
+    }
+    const rA = fakeFetch(() => ({ status: 200, body: { content: [{ type: "thinking", thinking: "They said hi." }, { type: "text", text: "Hi" }] } }));
+    expect(await Provider.anthropic({ apiKey: { env: "TDD_TEST_KEY" }, fetch: rA.fn }).complete({ model: "m", prompt: "Hi" })).toEqual({ text: "Hi", reasoning: "They said hi." });
 
     const ollama = fakeFetch(() => ({ status: 200, body: openaiReply("ok") }));
     await Provider.ollama({ fetch: ollama.fn }).complete({ model: "llama3.2", prompt: "Hi" });
@@ -267,6 +278,47 @@ describe("LLMTextGen", () => {
     expect(jsonExample.render(() => "{{ Ada }}")).toBe(`Reply as {"bio": "..."} for {{ Ada }}`);
   });
 
+  it("reasoningOf puts the model's reasoning in another field; traceOf reads any field's trace", async () => {
+    interface Answer {
+      question: string;
+      answer: string;
+      answerReasoning?: string;
+      reasoningWords: number;
+    }
+    const a = rootRefs<Answer>("answer");
+    const gen = new TreeGen<Answer>({
+      id: "answer",
+      fields: {
+        question: new CategorySamplerGen({ values: ["Why is the sky blue?"] }),
+        answer: new LLMTextGen({ model: "thinker", prompt: prompt`${a.question}` }),
+        answerReasoning: reasoningOf(a.answer),
+        // Any Gen can read a trace: traceOf(ref) is a Ref<Trace>.
+        reasoningWords: CustomGen.bound({ inputs: { t: traceOf(a.answer) }, fn: ({ t }) => t.reasoning?.split(" ").length ?? 0 }),
+      },
+    });
+    expect(Plan.compile(gen).toText()).toContain("answerReasoning  <- trace=traceOf(answer)");
+
+    const mock = new MockProvider({ respond: () => ({ text: "Scattering.", reasoning: "Short waves scatter more." }) });
+    const setup = { providers: { mock }, models: { thinker: { provider: "mock", model: "m" } } };
+    const { records } = await preview({ gen, numRecords: 2, seed: 1, ...setup });
+    expect(records[0]).toEqual({ question: "Why is the sky blue?", answer: "Scattering.", answerReasoning: "Short waves scatter more.", reasoningWords: 4 });
+
+    // No reasoning sent, or a field that is not an LLM field: undefined.
+    const quiet = await preview({ gen, numRecords: 1, ...setup, providers: { mock: new MockProvider({ respond: () => "Scattering." }) } });
+    expect(quiet.records[0]!.answerReasoning).toBeUndefined();
+    const fromSampler = new TreeGen<Pick<Answer, "question" | "answerReasoning">>({
+      fields: { question: new CategorySamplerGen({ values: ["Why?"] }), answerReasoning: reasoningOf(a.question) },
+    });
+    expect((await preview({ gen: fromSampler, numRecords: 1 })).records[0]!.answerReasoning).toBeUndefined();
+
+    // traceOf reads one field, not an object.
+    const nested = new TreeGen<{ p: { q: string }; r?: string }>({
+      fields: { p: new TreeGen({ fields: { q: new CategorySamplerGen({ values: ["x"] }) } }), r: reasoningOf(refs<{ p: { q: string } }>().p) },
+    });
+    expect(() => Plan.compile(nested)).toThrow("field 'r' reads traceOf(p) (input 'trace'), which is an object; traceOf reads one field.");
+    expect(() => traceOf(traceOf(a.answer))).toThrow(/traceOf takes a ref to a field/);
+  });
+
   it.skipIf(skipLive)("live: llama-3.1-8b on OpenRouter", async () => {
     const { records } = await preview({
       gen: personGen(new LLMTextGen({ model: "llama", prompt: prompt`In at most 8 words, describe a ${p.occupation} named ${p.name}.` })),
@@ -288,4 +340,6 @@ export function compileErrors(): void {
   prompt`Bio for ${p.nmae}`;
   // @ts-expect-error an LLMTextGen produces text, but age is a number.
   new TreeGen<Pick<Person, "age">>({ fields: { age: bioGen } });
+  // @ts-expect-error reasoning may be missing, so its field must be optional (or `string | undefined`).
+  new TreeGen<{ bio: string; bioReasoning: string }>({ fields: { bio: bioGen, bioReasoning: reasoningOf(p.bio) } });
 }

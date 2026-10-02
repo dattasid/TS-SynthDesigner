@@ -9,6 +9,7 @@ export {
   refTarget,
   rootRefs,
   showRef,
+  traceOf,
   type Gen,
   type MaybePromise,
   type Ref,
@@ -16,6 +17,7 @@ export {
   type RefScope,
   type RefTarget,
   type RefTree,
+  type Trace,
 } from "./gen";
 export { MockProvider, type MockProviderParams } from "./llm/mock";
 export { json, prompt, Prompt, type JsonRef, type PromptPart, type PromptScalar } from "./llm/prompt";
@@ -31,6 +33,7 @@ export {
   type ProviderParams,
 } from "./llm/provider";
 export { LLMStructuredGen, parseJsonReply, type LLMStructuredGenParams, type SchemaInPrompt } from "./llm/structured";
+export { reasoningOf } from "./llm/reasoning";
 export { LLMTextGen, type LLMTextGenParams } from "./llm/text";
 export { Plan } from "./plan";
 export {

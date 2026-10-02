@@ -27,6 +27,9 @@ export interface LLMTextGenParams {
  *       prompt: prompt`Write a two-line bio for ${p.name}, a ${p.age}-year-old ${p.occupation}.`,
  *     })
  *
+ * The model's reasoning, from providers that send it separately, can go in another field with
+ * `reasoningOf(p.bio)`.
+ *
  * Async: all calls of one plan level (every row of the batch, every LLM field) are sent together,
  * limited by each provider's `maxConcurrency`.
  */
@@ -94,7 +97,10 @@ class LLMTextCall extends BaseGen<string, Record<string, unknown>> {
     };
     const where = ctx.pathString;
     return provider.complete(request).then(
-      (completion) => completion.text,
+      (completion) => {
+        if (completion.reasoning) ctx.trace({ reasoning: completion.reasoning });
+        return completion.text;
+      },
       (error: Error) => {
         if (this.onFailure === "default") return this.defaultValue;
         throw new GenerationError(`${this.describe()} at ${where}: ${error.message}`);
