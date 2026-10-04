@@ -2,6 +2,7 @@
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, expectTypeOf, it } from "vitest";
+import { productReviewGen } from "../examples/product-reviews";
 import { FakerGen } from "../src/faker";
 import {
   CategorySamplerGen,
@@ -176,6 +177,21 @@ it("names, emails, addresses: faker-js", async () => {
     },
   });
   console.table((await preview({ gen: customer, numRecords: 3, seed: 5 })).records);
+});
+
+it("DataDesigner's tutorial: product reviews (examples/product-reviews.ts)", async () => {
+  // The whole tutorial, ported field for field. examples/product-reviews.run.ts runs it on a real model.
+  const { records } = await preview({
+    gen: productReviewGen,
+    numRecords: 2,
+    seed: 1,
+    providers: { mock: new MockProvider() }, // echoes the prompt
+    models: { writer: { provider: "mock", model: "echo" } },
+  });
+  const [first] = records;
+  expect(first!.customerReview).toContain(`named ${first!.customer.firstName} from ${first!.customer.city}`);
+  expect(first!.customerReview).toContain(first!.productName); // reads the other LLM field
+  console.log(records);
 });
 
 it("an LLM field", async () => {
