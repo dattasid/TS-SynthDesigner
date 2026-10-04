@@ -5,13 +5,26 @@
   "description": "Typed synthetic data generation for TypeScript, modeled on NVIDIA NeMo DataDesigner.",
   "type": "module",
   "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./faker": "./src/faker.ts"
+  },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "tsc --noEmit && vitest run"
   },
+  "peerDependencies": {
+    "@faker-js/faker": "^9.9.0"
+  },
+  "peerDependenciesMeta": {
+    "@faker-js/faker": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@types/node": "^22.20.4",
     "typescript": "^5.9.3",
-    "vitest": "^2.1.9"
+    "vitest": "^2.1.9",
+    "@faker-js/faker": "^9.9.0"
   }
 }

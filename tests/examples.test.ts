@@ -2,6 +2,7 @@
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, expectTypeOf, it } from "vitest";
+import { FakerGen } from "../src/faker";
 import {
   CategorySamplerGen,
   Context,
@@ -153,6 +154,28 @@ it("custom Gens: plain functions, few types", async () => {
   const { records } = await preview({ gen: worker, numRecords: 5, seed: 3 });
   console.table(records.map(({ education, ...w }) => ({ ...w, city: education.city })));
   for (const w of records) expect(w.seniority.startsWith(w.age < 30 ? "junior" : "senior")).toBe(true);
+});
+
+interface Customer {
+  sex: "male" | "female";
+  firstName: string;
+  lastName: string;
+  email: string;
+}
+
+it("names, emails, addresses: faker-js", async () => {
+  // FakerGen has its own entry point ("ts-datadesigner/faker"), so faker loads only when used.
+  // faker draws from the field's stream: the same seed gives the same people.
+  const c = refs<Customer>();
+  const customer = new TreeGen<Customer>({
+    fields: {
+      sex: new CategorySamplerGen<Customer["sex"]>({ values: ["male", "female"] }),
+      firstName: FakerGen.bound({ inputs: { sex: c.sex }, fn: (f, { sex }) => f.person.firstName(sex) }),
+      lastName: new FakerGen({ fn: (f) => f.person.lastName() }),
+      email: FakerGen.bound({ inputs: { firstName: c.firstName, lastName: c.lastName }, fn: (f, names) => f.internet.email(names) }),
+    },
+  });
+  console.table((await preview({ gen: customer, numRecords: 3, seed: 5 })).records);
 });
 
 it("an LLM field", async () => {
