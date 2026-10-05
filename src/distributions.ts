@@ -101,6 +101,13 @@ export class WeightedTable<V> {
   }
 }
 
+/**
+ * Rounds to `decimalPlaces` decimals. Dividing last keeps the result the closest number to the
+ * decimal (multiplying by 0.01 would not), so it prints with no stray digits: 1.37, not
+ * 1.3700000000000001. A float still cannot hold 1.37 exactly, so arithmetic on such values can
+ * show stray digits again (0.1 + 0.2). Fine for a dataset; financial data would need an
+ * integer-backed fixed-point type (e.g. cents), not built yet.
+ */
 export function roundTo(value: number, decimalPlaces: number | undefined): number {
   if (decimalPlaces === undefined) return value;
   const factor = 10 ** decimalPlaces;

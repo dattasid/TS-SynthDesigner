@@ -9,11 +9,14 @@ export interface UniformParams {
   type: "uniform";
   /** Lower bound, inclusive. */
   low: number;
-  /** Upper bound: exclusive, or inclusive when `integer` is true. */
+  /** Upper bound: exclusive, or inclusive when `integer` or `decimalPlaces` is given. */
   high: number;
   /** Sample whole numbers in [low, high]. Both bounds must then be integers. */
   integer?: boolean;
-  /** Round samples to this many decimals. */
+  /**
+   * Sample numbers with this many decimals in [low, high], each equally likely: `low: 10, high: 1000,
+   * decimalPlaces: 2` gives 10.00, 10.01, ..., 1000.00. See `roundTo` for how exact they are.
+   */
   decimalPlaces?: number;
 }
 
@@ -69,6 +72,8 @@ export type NumberSamplerType = NumberSamplerParams["type"];
  */
 export class NumberSamplerGen extends BaseGen<number> {
   readonly params: NumberSamplerParams;
+  /** Uniform with decimalPlaces: the bounds in steps of 10^-decimalPlaces. */
+  private steps: [number, number] | undefined;
 
   constructor(params: NumberSamplerParams) {
     super(params.id);
@@ -81,6 +86,9 @@ export class NumberSamplerGen extends BaseGen<number> {
     switch (p.type) {
       case "uniform":
         if (p.integer) return ctx.rng.int(p.low, p.high);
+        // A whole number of steps, divided by 10^n: rounding a float instead would make the end
+        // values half as likely as the others.
+        if (this.steps) return ctx.rng.int(...this.steps) / 10 ** p.decimalPlaces!;
         return roundTo(p.low + ctx.rng.random() * (p.high - p.low), p.decimalPlaces);
       case "gaussian":
         return roundTo(normal(ctx.rng, p.mean, p.stddev), p.decimalPlaces);
@@ -118,6 +126,16 @@ export class NumberSamplerGen extends BaseGen<number> {
           this.check(Number.isFinite(p.low) && Number.isFinite(p.high) && p.low < p.high, `need finite low < high, got [${p.low}, ${p.high}).`);
         }
         this.checkDecimalPlaces(p.decimalPlaces);
+        if (p.decimalPlaces !== undefined) {
+          const factor = 10 ** p.decimalPlaces;
+          // low * factor can be a hair off a whole number (0.07 * 100 = 7.000000000000001); snap it first.
+          const snap = (x: number) => (Math.abs(x - Math.round(x)) <= 1e-9 * Math.max(1, Math.abs(x)) ? Math.round(x) : x);
+          const lo = Math.ceil(snap(p.low * factor));
+          const hi = Math.floor(snap(p.high * factor));
+          this.check(Number.isSafeInteger(lo) && Number.isSafeInteger(hi), `[${p.low}, ${p.high}] with ${p.decimalPlaces} decimal places is too many digits for a number.`);
+          this.check(lo <= hi, `no number with ${p.decimalPlaces} decimal places is in [${p.low}, ${p.high}].`);
+          this.steps = [lo, hi];
+        }
         return;
       case "gaussian":
         this.check(Number.isFinite(p.mean), `mean must be finite, got ${p.mean}.`);
