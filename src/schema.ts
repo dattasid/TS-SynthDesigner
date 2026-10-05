@@ -1,3 +1,4 @@
+import { roundTo } from "./distributions";
 import { ConfigError } from "./errors";
 
 /**
@@ -111,34 +112,51 @@ export interface NumberSchemaParams extends DescribedParams {
   max?: number;
 }
 
+export interface DecimalSchemaParams extends NumberSchemaParams {
+  /**
+   * Decimals the number has, e.g. 2 for a price. Asked for in the prompt; a reply with more is
+   * rounded, as DataDesigner does, not retried. (DataDesigner rounds the decimal text half up, so
+   * 1.005 gives 1.01; this rounds the float, which is just under 1.005, so 1.00. See `roundTo`.)
+   */
+  decimalPlaces?: number;
+}
+
 export class NumberSchema extends Schema<number> {
   readonly min: number | undefined;
   readonly max: number | undefined;
+  readonly decimalPlaces: number | undefined;
 
-  constructor(readonly integer: boolean, { description, min, max }: NumberSchemaParams) {
+  constructor(readonly integer: boolean, { description, min, max, decimalPlaces }: DecimalSchemaParams) {
     super(description);
     checkBounds(integer ? "integer" : "number", min, max, integer);
+    if (decimalPlaces !== undefined && !(Number.isInteger(decimalPlaces) && decimalPlaces >= 0 && decimalPlaces <= 15)) {
+      throw new ConfigError(`s.number: decimalPlaces must be an integer from 0 to 15, got ${decimalPlaces}.`);
+    }
     this.min = min;
     this.max = max;
+    this.decimalPlaces = decimalPlaces;
   }
 
   check(value: unknown, path: string, issues: string[]): unknown {
-    const ok =
-      typeof value === "number" &&
-      Number.isFinite(value) &&
-      (!this.integer || Number.isInteger(value)) &&
-      (this.min === undefined || value >= this.min) &&
-      (this.max === undefined || value <= this.max);
-    return ok ? value : fail(issues, path, this.expected(), value);
+    if (typeof value !== "number" || !Number.isFinite(value)) return fail(issues, path, this.expected(), value);
+    // Rounded before the bounds check, so 999.996 with max 1000 and 2 places is 1000.
+    const v = roundTo(value, this.decimalPlaces);
+    const ok = (!this.integer || Number.isInteger(v)) && (this.min === undefined || v >= this.min) && (this.max === undefined || v <= this.max);
+    return ok ? v : fail(issues, path, this.expected(), value);
   }
   toJSONSchema() {
-    return this.withDescription({ type: this.integer ? "integer" : "number", minimum: this.min, maximum: this.max });
+    // As text, not `multipleOf`: strict structured-output APIs do not all accept that keyword.
+    const places = this.decimalPlaces === undefined ? undefined : `${this.decimalPlaces} decimal places`;
+    const description = [this.description, places].filter((d) => d !== undefined).join("; ");
+    const schema = { type: this.integer ? "integer" : "number", minimum: this.min, maximum: this.max };
+    return Object.fromEntries(Object.entries({ ...schema, description: description || undefined }).filter(([, v]) => v !== undefined));
   }
   shape() {
     return this.integer ? "integer" : "number";
   }
   expected() {
-    return (this.integer ? "an integer" : "a number") + range(this.min, this.max);
+    const places = this.decimalPlaces === undefined ? "" : ` with ${this.decimalPlaces} decimal places`;
+    return (this.integer ? "an integer" : "a number") + range(this.min, this.max) + places;
   }
 }
 
@@ -355,7 +373,7 @@ export class ObjectSchema<F extends Fields> extends Schema<ObjectValue<F>> {
 /** The schema builder. See `Schema`. */
 export const s = {
   string: (params: DescribedParams = {}) => new StringSchema(params.description),
-  number: (params: NumberSchemaParams = {}) => new NumberSchema(false, params),
+  number: (params: DecimalSchemaParams = {}) => new NumberSchema(false, params),
   integer: (params: NumberSchemaParams = {}) => new NumberSchema(true, params),
   boolean: (params: DescribedParams = {}) => new BooleanSchema(params.description),
   enum: <const V extends string>(values: readonly V[], params: DescribedParams = {}) => new EnumSchema<V>(values, params),

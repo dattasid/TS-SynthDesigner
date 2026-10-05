@@ -130,6 +130,21 @@ describe("schema builder", () => {
     ]);
   });
 
+  it("decimalPlaces: asked for in the prompt, replies rounded before the bounds check", () => {
+    const product = s.object({ price: s.number({ min: 10, max: 1000, decimalPlaces: 2, description: "the price in dollars" }) });
+    expect(product.validate({ price: 19.999 })).toEqual({ ok: true, value: { price: 20 } });
+    expect(product.validate({ price: 12.345 })).toEqual({ ok: true, value: { price: 12.35 } });
+    expect(product.validate({ price: 1000.004 })).toEqual({ ok: true, value: { price: 1000 } });
+    expect(product.validate({ price: 1000.01 })).toEqual({ ok: false, issues: ["price: expected a number from 10 to 1000 with 2 decimal places, got 1000.01"] });
+    expect(product.notes()).toEqual(["- price: the price in dollars; a number from 10 to 1000 with 2 decimal places"]);
+    expect(product.toJSONSchema().properties).toEqual({
+      price: { type: "number", minimum: 10, maximum: 1000, description: "the price in dollars; 2 decimal places" },
+    });
+    // @ts-expect-error integers have no decimal places
+    s.integer({ decimalPlaces: 2 });
+    expect(() => s.number({ decimalPlaces: 1.5 })).toThrow(ConfigError);
+  });
+
   it("rejects bad definitions when they are made", () => {
     expect(() => s.integer({ min: 5, max: 1 })).toThrow(ConfigError);
     expect(() => s.integer({ min: 1.5 })).toThrow(/min must be an integer/);

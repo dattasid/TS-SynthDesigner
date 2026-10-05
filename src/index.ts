@@ -68,6 +68,7 @@ export {
   type ArraySchemaParams,
   type DescribedParams,
   type Infer,
+  type DecimalSchemaParams,
   type NumberSchemaParams,
   type ObjectValue,
 } from "./schema";
