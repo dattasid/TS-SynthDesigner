@@ -194,6 +194,30 @@ it("DataDesigner's tutorial: product reviews (examples/product-reviews.ts)", asy
   console.log(records);
 });
 
+it("conditional prompt text: match, in place of Jinja's {% if %}", () => {
+  interface Review {
+    ageRange: string;
+    stars: number;
+    product: string;
+  }
+  const r = rootRefs<Review>("review");
+  // Cases are tried in order. The inputs are typed from the refs: `stars` is a number here.
+  const review = prompt`Write a review of ${r.product}. `
+    .match({
+      inputs: { age: r.ageRange, stars: r.stars },
+      cases: [
+        { when: ({ stars }) => stars <= 2, then: prompt`Say what went wrong with ${r.product}.` },
+        { when: ({ age }) => age === "18-25", then: "Be informal and conversational." },
+      ],
+      otherwise: "Be formal and structured.",
+    })
+    .append(" Reply with only the review.");
+  // A Prompt is text with holes; an LLM Gen fills them per row. Here by hand:
+  expect(review.render((key) => ({ "review.product": "Mug", "review.ageRange": "18-25", "review.stars": 4 })[key])).toBe(
+    "Write a review of Mug. Be informal and conversational. Reply with only the review.",
+  );
+});
+
 it("an LLM field", async () => {
   interface Profile {
     name: string;

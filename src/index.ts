@@ -20,7 +20,18 @@ export {
   type Trace,
 } from "./gen";
 export { MockProvider, type MockProviderParams } from "./llm/mock";
-export { json, prompt, Prompt, type JsonRef, type PromptPart, type PromptScalar } from "./llm/prompt";
+export {
+  json,
+  match,
+  prompt,
+  Prompt,
+  PromptMatch,
+  type JsonRef,
+  type MatchCase,
+  type MatchParams,
+  type PromptPart,
+  type PromptScalar,
+} from "./llm/prompt";
 export {
   Limiter,
   Provider,
