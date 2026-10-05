@@ -1,4 +1,5 @@
 import type { Context } from "./context";
+import { ConfigError } from "./errors";
 import { BaseGen, BoundGen, type MaybePromise, type Ref } from "./gen";
 
 /** The value type a ref points to: `Ref<number>` -> `number`. */
@@ -60,4 +61,60 @@ export class CustomGen<Out, Inputs = {}> extends BaseGen<Out, Inputs> {
   generate(inputs: Inputs, ctx: Context): MaybePromise<Out> {
     return this.fn(inputs, ctx);
   }
+}
+
+/**
+ * CustomGen under the name people look for when a field is a function of others, `field2 =
+ * f(field1)`: a sum, a template, a lookup. Same two forms; errors name it FunctionGen.
+ *
+ *     total: FunctionGen.bound({ inputs: { price: p.price, qty: p.qty }, fn: ({ price, qty }) => price * qty }),
+ *     name: FunctionGen.bound({ inputs: { f: c.firstName, l: c.lastName }, fn: ({ f, l }) => `${f} ${l}` }),
+ */
+export class FunctionGen<Out, Inputs = {}> extends CustomGen<Out, Inputs> {
+  static override bound<const R extends Record<string, Ref<unknown>>, Out>({ id, inputs, fn }: CustomGenBoundParams<R, Out>): BoundGen<Out> {
+    return new FunctionGen<Out, RefValues<R>>({ id, fn }).bind(inputs as never);
+  }
+}
+
+export interface ConstantGenParams<T> {
+  id?: string;
+  /** The value every row gets: made elsewhere, e.g. by another run with `numRecords: 1`, read from a file, or typed in. */
+  value: T;
+}
+
+/**
+ * The same value in every row, e.g. a scene that characters are made for:
+ *
+ *     const [scene] = (await preview({ gen: sceneGen, numRecords: 1 })).records;
+ *     scene: new ConstantGen({ value: scene }),
+ *     description: new LLMTextGen({ model: "fast", prompt: prompt`A character for ${c.scene.setting}.` }),
+ *
+ * Typed by the value. It is copied once (so it must be plain data: no functions or class instances
+ * beyond Date, Map, Set and the like) and frozen, so every row shares one copy that nobody can change.
+ */
+export class ConstantGen<T> extends BaseGen<T> {
+  readonly value: T;
+
+  constructor({ id, value }: ConstantGenParams<T>) {
+    super(id);
+    let copy: T;
+    try {
+      copy = structuredClone(value);
+    } catch (error) {
+      throw new ConfigError(`${this.describe()}: value must be plain data, since it is copied once: ${(error as Error).message}`);
+    }
+    this.value = deepFreeze(copy);
+  }
+
+  generate(): T {
+    return this.value;
+  }
+}
+
+function deepFreeze<T>(value: T): T {
+  if (typeof value === "object" && value !== null && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    for (const v of Object.values(value)) deepFreeze(v);
+  }
+  return value;
 }

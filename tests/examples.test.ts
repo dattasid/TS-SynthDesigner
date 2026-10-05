@@ -8,13 +8,16 @@ import {
   CategorySamplerGen,
   Context,
   create,
+  ConstantGen,
   CustomGen,
+  FunctionGen,
   LLMStructuredGen,
   LLMTextGen,
   MatchGen,
   MockProvider,
   NumberSamplerGen,
   preview,
+  previewSync,
   prompt,
   reasoningOf,
   refs,
@@ -120,6 +123,32 @@ interface Worker {
   occupation: string;
   seniority: string;
 }
+
+it("derived and constant fields: FunctionGen, ConstantGen", () => {
+  interface Scene {
+    setting: string;
+    mood: string;
+  }
+  interface Character {
+    scene: Scene;
+    firstName: string;
+    lastName: string;
+    fullName: string;
+  }
+  const c = rootRefs<Character>("character");
+  // Made elsewhere: by another run with numRecords: 1, read from a file, or typed in.
+  const scene: Scene = { setting: "a lighthouse in a storm", mood: "tense" };
+  const character = new TreeGen<Character>({
+    fields: {
+      scene: new ConstantGen({ value: scene }), // every row; refs read into it: c.scene.setting
+      firstName: new CategorySamplerGen({ values: ["Ada", "Linus"] }),
+      lastName: new CategorySamplerGen({ values: ["Byron", "Torvalds"] }),
+      // field2 = f(field1): FunctionGen is CustomGen under the name you would look for.
+      fullName: FunctionGen.bound({ inputs: { f: c.firstName, l: c.lastName }, fn: ({ f, l }) => `${f} ${l}` }),
+    },
+  });
+  console.table(previewSync({ gen: character, numRecords: 3, seed: 1 }).records);
+});
 
 it("custom Gens: plain functions, few types", async () => {
   const p = rootRefs<Worker>("worker");
