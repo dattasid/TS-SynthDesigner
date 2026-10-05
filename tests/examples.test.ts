@@ -23,6 +23,7 @@ import {
   refs,
   rootRefs,
   s,
+  showRef,
   SubCategorySamplerGen,
   TreeGen,
   type Infer,
@@ -256,7 +257,8 @@ it("conditional fields: MatchGen (DataDesigner's conditional params and skipped 
 });
 
 it("conditional prompt text: match, in place of Jinja's {% if %}", () => {
-  const Review = s.object({ ageRange: s.string(), stars: s.integer(), product: s.string() });
+  // `name` labels the schema in messages: refs show as review.product, not root.product.
+  const Review = s.object({ ageRange: s.string(), stars: s.integer(), product: s.string() }, { name: "review" });
   const r = rootRefs(Review);
   // Cases are tried in order. The inputs are typed from the refs: `stars` is a number here.
   const review = prompt`Write a review of ${r.product}. `
@@ -270,7 +272,8 @@ it("conditional prompt text: match, in place of Jinja's {% if %}", () => {
     })
     .append(" Reply with only the review.");
   // A Prompt is text with holes; an LLM Gen fills them per row. Here by hand:
-  expect(review.render((key) => ({ "root.product": "Mug", "root.ageRange": "18-25", "root.stars": 4 })[key])).toBe(
+  const row: Record<string, unknown> = { "review.product": "Mug", "review.ageRange": "18-25", "review.stars": 4 };
+  expect(review.render((_key, ref) => row[showRef(ref)])).toBe(
     "Write a review of Mug. Be informal and conversational. Reply with only the review.",
   );
 });

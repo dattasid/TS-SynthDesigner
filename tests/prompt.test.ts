@@ -9,7 +9,10 @@ import {
   Plan,
   preview,
   prompt,
+  refs,
+  refTarget,
   rootRefs,
+  showRef,
   s,
   TreeGen,
   type Infer,
@@ -26,9 +29,9 @@ type Review = Infer<typeof Review>;
 
 const r = rootRefs(Review);
 
-/** Renders with values given by field name: `{ stars: 1 }` fills `root.stars`. */
+/** Renders with values given by field name: `{ stars: 1 }` fills `r.stars`. */
 const renderWith = (p: ReturnType<typeof prompt>, values: Partial<Review>) =>
-  p.render((key) => values[key.replace("root.", "") as keyof Review]);
+  p.render((_key, ref) => values[refTarget(ref)!.path[0] as keyof Review]);
 
 const tone = match({
   inputs: { age: r.ageRange, stars: r.stars },
@@ -98,6 +101,16 @@ describe("match in prompts", () => {
       // @ts-expect-error when must return a boolean
       cases: [{ when: ({ stars }) => stars, then: "x" }],
     });
+  });
+
+  it("refs show by their schema's name; same-named schemas still get separate inputs", () => {
+    const A = s.object({ city: s.string() }, { name: "place" });
+    const B = s.object({ city: s.string() }, { name: "place" });
+    expect(showRef(refs(A).city)).toBe("place.city");
+    expect(showRef(refs(s.object({ city: s.string() })).city)).toBe("self.city"); // unnamed: the scope
+    const p = prompt`${refs(A).city} / ${rootRefs(B).city}`;
+    expect(p.refsByKey.size).toBe(2);
+    expect(() => s.object({ a: s.string() }, { name: "my place" })).toThrow(/name must be an identifier/);
   });
 
   it("checks its params at runtime too", () => {

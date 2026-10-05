@@ -1,6 +1,6 @@
 import type { RefValues } from "../custom";
 import { ConfigError } from "../errors";
-import { refTarget, showRef, type Ref } from "../gen";
+import { refKey, refTarget, type Ref } from "../gen";
 
 /** Values a prompt can show as text. `null` and `undefined` show as "None". */
 export type PromptScalar = string | number | boolean | null | undefined;
@@ -125,7 +125,7 @@ export class Prompt {
       } else if (part instanceof PromptMatch) {
         const keys: Record<string, string> = {};
         for (const [name, r] of Object.entries(part.inputs)) {
-          keys[name] = showRef(r);
+          keys[name] = refKey(r);
           refsByKey.set(keys[name], r);
         }
         for (const branch of [...part.cases.map((c) => c.then), ...(part.otherwise ? [part.otherwise] : [])]) {
@@ -140,7 +140,7 @@ export class Prompt {
         }
         pieces.push(String(part));
       } else {
-        const key = showRef(ref);
+        const key = refKey(ref as Ref<unknown>);
         refsByKey.set(key, ref as Ref<unknown>);
         pieces.push({ key, json: isJson });
       }
@@ -166,18 +166,22 @@ export class Prompt {
     return new Prompt(["", "", ""], [this, match(params)]);
   }
 
-  /** The text, with each hole filled by `valueOf(ref path)`. */
-  render(valueOf: (key: string) => unknown): string {
+  /**
+   * The text, with each hole filled by `valueOf(key, ref)`: the key is the ref's `refKey` (as in
+   * `refsByKey`). To render by hand, look values up by the ref, e.g. `showRef(ref)`.
+   */
+  render(valueOf: (key: string, ref: Ref<unknown>) => unknown): string {
+    const read = (key: string) => valueOf(key, this.refsByKey.get(key)!);
     let out = "";
     for (const piece of this.pieces) {
       if (typeof piece === "string") out += piece;
       else if ("cases" in piece) {
         const inputs: Record<string, unknown> = {};
-        for (const [name, key] of Object.entries(piece.keys)) inputs[name] = valueOf(key);
+        for (const [name, key] of Object.entries(piece.keys)) inputs[name] = read(key);
         const branch = piece.cases.find((c) => c.when(inputs))?.then ?? piece.otherwise;
         if (branch) out += branch.render(valueOf);
       } else {
-        const value = valueOf(piece.key);
+        const value = read(piece.key);
         out += piece.json ? JSON.stringify(value, null, 2) : value === null || value === undefined ? "None" : String(value);
       }
     }

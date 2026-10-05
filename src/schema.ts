@@ -389,11 +389,24 @@ export type Output<S> =
           ? T
           : never;
 
+export interface ObjectSchemaParams extends DescribedParams {
+  /**
+   * What to call this object in messages: refs made from it show as `person.country` instead of
+   * `root.country`. An identifier, e.g. "person".
+   */
+  name?: string;
+}
+
 export class ObjectSchema<F extends Fields> extends Schema<ObjectValue<F>> {
   readonly fields: Readonly<F>;
+  readonly name: string | undefined;
 
-  constructor(fields: F, { description }: DescribedParams) {
+  constructor(fields: F, { description, name }: ObjectSchemaParams) {
     super(description);
+    if (name !== undefined && (typeof name !== "string" || !/^[A-Za-z_$][\w$]*$/.test(name))) {
+      throw new ConfigError(`s.object: name must be an identifier like "person", got ${JSON.stringify(name)}.`);
+    }
+    this.name = name;
     if (typeof fields !== "object" || fields === null || Array.isArray(fields)) {
       throw new ConfigError(`s.object: fields must be an object of schemas, got ${show(fields)}.`);
     }
@@ -445,7 +458,7 @@ export class ObjectSchema<F extends Fields> extends Schema<ObjectValue<F>> {
     for (const key of keys) {
       if (!Object.hasOwn(this.fields, key)) throw new ConfigError(`pick: '${key}' is not a field. Fields: ${Object.keys(this.fields).join(", ")}.`);
     }
-    return new ObjectSchema(Object.fromEntries(keys.map((k) => [k, this.fields[k]])) as Pick<F, K>, { description: this.description });
+    return new ObjectSchema(Object.fromEntries(keys.map((k) => [k, this.fields[k]])) as Pick<F, K>, { description: this.description, name: this.name });
   }
 
   /** The keys of `.temp()` fields, at this level. */
@@ -507,5 +520,5 @@ export const s = {
   enum: <const V extends string>(values: readonly V[], params: DescribedParams = {}) => new EnumSchema<V>(values, params),
   date: (params: DescribedParams = {}) => new DateSchema(params.description),
   array: <I extends Schema<unknown>>(items: I, params: ArraySchemaParams = {}) => new ArraySchema<I>(items, params),
-  object: <F extends Fields>(fields: F, params: DescribedParams = {}) => new ObjectSchema<F>(fields, params),
+  object: <F extends Fields>(fields: F, params: ObjectSchemaParams = {}) => new ObjectSchema<F>(fields, params),
 };

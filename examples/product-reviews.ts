@@ -12,7 +12,7 @@ export const Customer = s.object({
   age: s.integer({ min: 18, max: 70 }),
   city: s.string(),
   state: s.string(),
-});
+}, { name: "customer" });
 export type Customer = Infer<typeof Customer>;
 
 export const ProductReview = s.object({
@@ -24,7 +24,7 @@ export const ProductReview = s.object({
   reviewStyle: s.string(),
   productName: s.string(),
   customerReview: s.string(),
-});
+}, { name: "productReview" });
 export type ProductReview = Infer<typeof ProductReview>;
 
 const c = refs(Customer);

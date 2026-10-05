@@ -55,12 +55,29 @@ export function refTarget(value: unknown): RefTarget | undefined {
   return (value as { [REF_TARGET]?: RefTarget })[REF_TARGET];
 }
 
-/** For error messages: `root.education.city`, `self.city`, `parent.country`. */
+/**
+ * For error messages: `person.education.city`, by the schema's `name`; for an unnamed schema, by the
+ * scope: `root.education.city`, `self.city`, `parent.country`.
+ */
 export function showRef(ref: unknown): string {
   const target = refTarget(ref);
   if (!target) return String(ref);
-  const path = [target.scope, ...target.path].join(".");
+  const path = [target.schema.name ?? target.scope, ...target.path].join(".");
   return target.trace ? `traceOf(${path})` : path;
+}
+
+const schemaIds = new WeakMap<object, number>();
+let nextSchemaId = 1;
+
+/**
+ * A key that is the same exactly for refs to the same place: scope, schema object and path. Unlike
+ * `showRef`, two schemas with the same name never share a key. For grouping refs (prompt inputs).
+ */
+export function refKey(ref: Ref<unknown>): string {
+  const target = refTarget(ref)!;
+  let id = schemaIds.get(target.schema);
+  if (id === undefined) schemaIds.set(target.schema, (id = nextSchemaId++));
+  return `${target.scope}#${id}:${target.path.join(".")}${target.trace ? "#trace" : ""}`;
 }
 
 function makeRef(scope: RefScope, path: readonly string[], schema: ObjectSchema<any>): unknown {
