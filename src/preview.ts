@@ -1,10 +1,12 @@
 import { Context, type ModelSpec } from "./context";
 import type { LLMProvider } from "./llm/provider";
 import type { Gen } from "./gen";
+import { finisher, type RecordOf } from "./output";
 import { Plan } from "./plan";
 
-export interface PreviewParams<T> {
-  gen: Gen<T>;
+export interface PreviewParams<G extends Gen<unknown>> {
+  /** What to generate: usually a TreeGen, whose records are checked against its schema and lose their `.temp()` fields. */
+  gen: G;
   numRecords?: number;
   /** Omit for a random seed. The result reports the seed used. */
   seed?: number | readonly number[];
@@ -28,11 +30,17 @@ export interface PreviewResults<T> {
 /**
  * Generates a few records in memory. Mirrors DataDesigner's `preview()`; `create()` writes them to a file.
  * Async because a tree may contain async Gens (LLMs); for trees without them, see `previewSync`.
+ *
+ * A tree's records are checked against its schema (a GenerationError names the record and the
+ * problems), and their `.temp()` fields are dropped: the records are `Output<typeof Schema>`.
  */
-export async function preview<T>(params: PreviewParams<T>): Promise<PreviewResults<T>> {
+export async function preview<G extends Gen<unknown>>(params: PreviewParams<G>): Promise<PreviewResults<RecordOf<G>>> {
   const { ctx, plan, batches } = setUp(params);
-  const records: T[] = [];
-  for (const size of batches) records.push(...(await plan.runBatch(ctx, size)));
+  const finish = finisher(params.gen);
+  const records: RecordOf<G>[] = [];
+  for (const size of batches) {
+    for (const record of await plan.runBatch(ctx, size)) records.push(finish(record, records.length) as RecordOf<G>);
+  }
   return { records, seed: ctx.seed };
 }
 
@@ -40,14 +48,17 @@ export async function preview<T>(params: PreviewParams<T>): Promise<PreviewResul
  * `preview()` without the Promise, for trees of sync Gens only (samplers, sync CustomGens). Throws
  * a GenerationError naming the field if a Gen turns out to be async.
  */
-export function previewSync<T>(params: PreviewParams<T>): PreviewResults<T> {
+export function previewSync<G extends Gen<unknown>>(params: PreviewParams<G>): PreviewResults<RecordOf<G>> {
   const { ctx, plan, batches } = setUp(params);
-  const records: T[] = [];
-  for (const size of batches) records.push(...(plan.runBatch(ctx, size, { sync: true }) as T[]));
+  const finish = finisher(params.gen);
+  const records: RecordOf<G>[] = [];
+  for (const size of batches) {
+    for (const record of plan.runBatch(ctx, size, { sync: true }) as unknown[]) records.push(finish(record, records.length) as RecordOf<G>);
+  }
   return { records, seed: ctx.seed };
 }
 
-export function setUp<T>({ gen, numRecords = 10, seed, batchSize = 100, providers, models }: PreviewParams<T>) {
+export function setUp<G extends Gen<unknown>>({ gen, numRecords = 10, seed, batchSize = 100, providers, models }: PreviewParams<G>) {
   if (!Number.isSafeInteger(numRecords) || numRecords < 0) {
     throw new RangeError(`numRecords must be an integer >= 0, got ${numRecords}.`);
   }

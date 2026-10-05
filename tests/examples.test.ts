@@ -127,6 +127,29 @@ const Worker = s.object({
   seniority: s.string(),
 });
 
+it("temp fields: made, read by other fields, dropped from the records", () => {
+  // DataDesigner's drop=True. The record type is Output<typeof Letter>: without the temp fields.
+  const Letter = s.object({
+    firstName: s.string().temp(),
+    lastName: s.string().temp(),
+    greeting: s.string(),
+  });
+  const l = rootRefs(Letter);
+  const letter = new TreeGen({
+    schema: Letter,
+    fields: {
+      firstName: new CategorySamplerGen({ values: ["Ada", "Linus"] }),
+      lastName: new CategorySamplerGen({ values: ["Byron", "Torvalds"] }),
+      greeting: FunctionGen.bound({ inputs: { f: l.firstName, n: l.lastName }, fn: ({ f, n }) => `Dear ${f} ${n},` }),
+    },
+  });
+  const { records } = previewSync({ gen: letter, numRecords: 2, seed: 1 });
+  expectTypeOf(records[0]!).toEqualTypeOf<{ greeting: string }>();
+  console.table(records); // only greeting
+  // Every record is also checked against the schema at runtime: what the types cannot see (bounds,
+  // casts, plain JavaScript) is a GenerationError naming the record and field.
+});
+
 it("derived and constant fields: FunctionGen, ConstantGen", () => {
   const Scene = s.object({ setting: s.string(), mood: s.string() });
   const Character = s.object({ scene: Scene, firstName: s.string(), lastName: s.string(), fullName: s.string() });

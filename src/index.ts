@@ -86,6 +86,7 @@ export {
   type Output,
 } from "./schema";
 export { create, type CreateParams, type CreateResults } from "./create";
+export { dropTemps, type RecordOf } from "./output";
 export { preview, previewSync, type PreviewParams, type PreviewResults } from "./preview";
 export { MersenneTwister, type Rng } from "./rng";
 export {
