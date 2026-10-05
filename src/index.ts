@@ -19,6 +19,7 @@ export {
   type RefTree,
   type Trace,
 } from "./gen";
+export { MatchGen, type MatchGenCase, type MatchGenParams, type MatchGenValue } from "./match";
 export { MockProvider, type MockProviderParams } from "./llm/mock";
 export {
   json,

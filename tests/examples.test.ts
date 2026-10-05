@@ -11,6 +11,7 @@ import {
   CustomGen,
   LLMStructuredGen,
   LLMTextGen,
+  MatchGen,
   MockProvider,
   NumberSamplerGen,
   preview,
@@ -192,6 +193,42 @@ it("DataDesigner's tutorial: product reviews (examples/product-reviews.ts)", asy
   expect(first!.customerReview).toContain(`named ${first!.customer.firstName} from ${first!.customer.city}`);
   expect(first!.customerReview).toContain(first!.productName); // reads the other LLM field
   console.log(records);
+});
+
+it("conditional fields: MatchGen (DataDesigner's conditional params and skipped columns)", async () => {
+  interface Review {
+    ageRange: string;
+    stars: number;
+    style: string;
+    complaint?: string; // optional: skipped for happy customers
+  }
+  const r = rootRefs<Review>("review");
+  const review = new TreeGen<Review>({
+    fields: {
+      ageRange: new CategorySamplerGen({ values: ["18-25", "25-50", "50+"] }),
+      stars: new NumberSamplerGen({ type: "uniform", low: 1, high: 5, integer: true }),
+      // Cases are tried in order; `then` and `otherwise` are a Gen or a plain value.
+      style: new MatchGen({
+        inputs: { age: r.ageRange },
+        cases: [{ when: ({ age }) => age === "18-25", then: "rambling" }],
+        otherwise: new CategorySamplerGen({ values: { brief: 2, detailed: 2, rambling: 1 } }),
+      }),
+      // No otherwise: undefined when no case holds, so the field must be optional. The LLM is only
+      // called for the rows that need it.
+      complaint: new MatchGen({
+        inputs: { stars: r.stars },
+        cases: [{ when: ({ stars }) => stars <= 2, then: new LLMTextGen({ model: "fast", prompt: prompt`Why ${r.stars} stars?` }) }],
+      }),
+    },
+  });
+  const { records } = await preview({
+    gen: review,
+    numRecords: 4,
+    seed: 1,
+    providers: { mock: new MockProvider() },
+    models: { fast: { provider: "mock", model: "echo" } },
+  });
+  console.table(records);
 });
 
 it("conditional prompt text: match, in place of Jinja's {% if %}", () => {
