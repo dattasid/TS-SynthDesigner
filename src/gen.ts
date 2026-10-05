@@ -39,7 +39,11 @@ export interface Ref<V> {
  * ordinary "property does not exist" error. Values that are not objects cannot be navigated further.
  */
 export type RefTree<T> = Ref<T> &
-  (NonNullable<T> extends object ? { readonly [K in keyof NonNullable<T> & string]-?: RefTree<NonNullable<T>[K]> } : {});
+  (NonNullable<T> extends object
+    ? // Through an optional object, every field below may be missing too: `p.specs.weight` is a
+      // Ref<number | undefined> when `specs` is optional.
+      { readonly [K in keyof NonNullable<T> & string]-?: RefTree<NonNullable<T>[K] | Extract<T, null | undefined>> }
+    : {});
 
 /** The scope and path of a ref, or undefined if `value` is not a ref. */
 export function refTarget(value: unknown): RefTarget | undefined {

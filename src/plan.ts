@@ -39,6 +39,12 @@ interface Step {
 
 const show = (path: Path) => (path.length === 0 ? "<root>" : path.join("."));
 const startsWith = (path: Path, prefix: Path) => prefix.every((p, i) => path[i] === p);
+/**
+ * Whether the step at `stepPath` makes (part of) what `path` reads: a field at or under the path
+ * (reading an object waits for all its fields), or the field whose value the path reads into, e.g.
+ * `product.name` from a structured LLM field `product`.
+ */
+const feeds = (stepPath: Path, path: Path) => startsWith(stepPath, path) || startsWith(path, stepPath);
 
 /**
  * A compiled generation plan: every field of every nested tree flattened into one list of steps,
@@ -245,7 +251,7 @@ function groupByLevel(steps: readonly Step[]): Step[][] {
   for (const step of steps) {
     let level = 0;
     for (const { path } of step.inputs) {
-      for (const [producer, l] of levelOf) if (startsWith(producer.path, path)) level = Math.max(level, l + 1);
+      for (const [producer, l] of levelOf) if (feeds(producer.path, path)) level = Math.max(level, l + 1);
     }
     levelOf.set(step, level);
     (levels[level] ??= []).push(step);
@@ -322,12 +328,13 @@ function sortSteps(steps: Step[]): Step[] {
   const dependsOn = steps.map((step) => {
     const deps = new Set<number>();
     for (const { name: input, path, trace } of step.inputs) {
-      const producers = steps.flatMap((s, i) => (startsWith(s.path, path) ? [i] : []));
+      const producers = steps.flatMap((s, i) => (feeds(s.path, path) ? [i] : []));
       if (producers.length === 0) {
         throw new ConfigError(`field '${show(step.path)}' reads '${show(path)}' (input '${input}'), which no field generates.`);
       }
       if (trace >= 0 && !(producers.length === 1 && steps[producers[0]!]!.path.length === path.length)) {
-        throw new ConfigError(`field '${show(step.path)}' reads traceOf(${show(path)}) (input '${input}'), which is an object; traceOf reads one field.`);
+        const what = steps[producers[0]!]!.path.length < path.length ? "part of a field's value" : "an object";
+        throw new ConfigError(`field '${show(step.path)}' reads traceOf(${show(path)}) (input '${input}'), which is ${what}; traceOf reads one whole field.`);
       }
       if (producers.includes(steps.indexOf(step))) {
         throw new ConfigError(`field '${show(step.path)}' reads '${show(path)}' (input '${input}'), which contains the field itself.`);
@@ -368,9 +375,10 @@ function assignTraceSlots(steps: Step[]): number {
   return count;
 }
 
+/** The value at `path`; undefined if an object on the way is missing (e.g. an optional part of an LLM reply). */
 function read(root: Record<string, unknown>, path: Path): unknown {
   let value: unknown = root;
-  for (const key of path) value = (value as Record<string, unknown>)[key];
+  for (const key of path) value = value === null || value === undefined ? undefined : (value as Record<string, unknown>)[key];
   return value;
 }
 

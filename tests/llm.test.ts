@@ -315,7 +315,7 @@ describe("LLMTextGen", () => {
     const nested = new TreeGen<{ p: { q: string }; r?: string }>({
       fields: { p: new TreeGen({ fields: { q: new CategorySamplerGen({ values: ["x"] }) } }), r: reasoningOf(refs<{ p: { q: string } }>().p) },
     });
-    expect(() => Plan.compile(nested)).toThrow("field 'r' reads traceOf(p) (input 'trace'), which is an object; traceOf reads one field.");
+    expect(() => Plan.compile(nested)).toThrow("field 'r' reads traceOf(p) (input 'trace'), which is an object; traceOf reads one whole field.");
     expect(() => traceOf(traceOf(a.answer))).toThrow(/traceOf takes a ref to a field/);
   });
 

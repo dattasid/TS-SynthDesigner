@@ -16,6 +16,7 @@ import {
   showRef,
   TreeGen,
   type BoundGen,
+  type RefTree,
 } from "../src/index";
 
 /** Test Gen: returns "<path>#<call>" and logs each call's path and inputs, so the run order is visible. */
@@ -164,6 +165,41 @@ describe("Plan", () => {
     expect(() => Plan.compile(selfReader)).toThrow(
       new ConfigError("field 'a.w' reads 'a' (input 'v'), which contains the field itself."),
     );
+  });
+
+  it("a ref can read into one field's value (e.g. a structured LLM reply): it waits for that field", () => {
+    interface Shop {
+      blurb: string;
+      product: { name: string; specs?: { weight: number } };
+      weight?: number;
+    }
+    const p = rootRefs<Shop>("shop");
+    const shop = new TreeGen<Shop>({
+      fields: {
+        // Declared first, read before it is made: the plan must order it after product.
+        blurb: CustomGen.bound({ inputs: { name: p.product.name }, fn: ({ name }) => `Buy ${name}!` }),
+        product: new CustomGen({ fn: (_: {}, ctx) => (ctx.rng.random() < 0.5 ? { name: "Mug" } : { name: "Lamp", specs: { weight: 2 } }) }),
+        // specs is optional: reading through a missing object gives undefined.
+        weight: CustomGen.bound({ inputs: { w: p.product.specs.weight }, fn: ({ w }) => w }),
+      },
+    });
+    // Through the optional specs, weight may be missing, and the ref's type says so.
+    expectTypeOf(p.product.specs.weight).toEqualTypeOf<RefTree<number | undefined>>();
+    new TreeGen<Pick<Shop, "product"> & { weight: number }>({
+      fields: {
+        product: shop.fields.product,
+        // @ts-expect-error weight is a required number, but the value read may be undefined
+        weight: CustomGen.bound({ inputs: { w: p.product.specs.weight }, fn: ({ w }) => w }),
+      },
+    });
+
+    const plan = Plan.compile(shop);
+    expect(plan.levels()).toEqual([["product"], ["blurb", "weight"]]);
+    const { records } = previewSync({ gen: shop, numRecords: 20, seed: 1 });
+    for (const r of records) {
+      expect(r.blurb).toBe(`Buy ${r.product.name}!`);
+      expect(r.weight).toBe(r.product.name === "Lamp" ? 2 : undefined);
+    }
   });
 
   it("refs are property access: any depth, and any field name", () => {
