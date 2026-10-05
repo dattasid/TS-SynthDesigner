@@ -93,6 +93,8 @@ class LLMStructuredCall<T> extends BaseGen<T, Record<string, unknown>> {
     this.check(typeof model === "string" && model !== "", "model must be a model nickname, e.g. \"fast\".");
     this.check(typeof prompt === "string" || prompt instanceof Prompt, "prompt must be a string or made with the prompt`...` tag.");
     this.check(schema instanceof ObjectSchema, "schema must be an object schema, made with s.object({...}).");
+    const problems = schema.llmProblems();
+    this.check(problems.length === 0, `schema cannot describe an LLM reply: ${problems.join(" ")}`);
     this.check(GUIDANCE.includes(schemaInPrompt), `schemaInPrompt must be one of ${GUIDANCE.map((g) => `"${g}"`).join(", ")}; got ${JSON.stringify(schemaInPrompt)}.`);
     this.check(typeof apiGuidedDecoding === "boolean", `apiGuidedDecoding must be true or false, got ${JSON.stringify(apiGuidedDecoding)}.`);
     this.check(Number.isSafeInteger(maxAttempts) && maxAttempts >= 1, `maxAttempts must be an integer >= 1, got ${maxAttempts}.`);

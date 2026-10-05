@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { ConfigError, s, type Infer, type Schema } from "../src/index";
+import { describe, expect, expectTypeOf, it } from "vitest";
+import { ConfigError, LLMStructuredGen, s, type Infer, type Output, type Schema } from "../src/index";
 
 const backStory = s.object({
   childhood: s.string({ description: "two sentences about where they grew up" }),
@@ -143,6 +143,45 @@ describe("schema builder", () => {
     // @ts-expect-error integers have no decimal places
     s.integer({ decimalPlaces: 2 });
     expect(() => s.number({ decimalPlaces: 1.5 })).toThrow(ConfigError);
+  });
+
+  it("data models: s.date(), and .temp() fields that Output drops at every depth", () => {
+    const Zone = s.object({ name: s.string(), seed: s.integer().temp() });
+    const World = s.object({
+      founded: s.date(),
+      notes: s.string().optional().temp(),
+      ruler: s.object({ name: s.string(), mood: s.string().temp() }).optional(),
+      zones: s.array(Zone),
+      scratch: s.object({ x: s.number() }).temp(),
+    });
+    // Infer: everything, as refs see it. Output: what records keep.
+    expectTypeOf<Infer<typeof World>>().toEqualTypeOf<{
+      founded: Date;
+      notes?: string;
+      ruler?: { name: string; mood: string };
+      zones: { name: string; seed: number }[];
+      scratch: { x: number };
+    }>();
+    expectTypeOf<Output<typeof World>>().toEqualTypeOf<{ founded: Date; ruler?: { name: string }; zones: { name: string }[] }>();
+
+    expect(World.tempKeys).toEqual(["notes", "scratch"]);
+    expect(World.optionalKeys).toEqual(["notes", "ruler"]);
+    const good = { founded: new Date("2020-01-01"), zones: [{ name: "a", seed: 1 }], scratch: { x: 1 } };
+    expect(World.validate(good).ok).toBe(true); // notes may be missing: optional under temp
+    expect(World.validate({ ...good, founded: new Date("nope") })).toEqual({ ok: false, issues: ["founded: expected a valid Date, got null"] });
+
+    expect(() => s.string().temp().optional()).toThrow("write .optional().temp()");
+    expect(() => s.array(s.string().temp())).toThrow(/items cannot be temp/);
+  });
+
+  it("an LLM reply schema may not contain dates or temp fields", () => {
+    const Reply = s.object({ when: s.date(), people: s.array(s.object({ name: s.string(), tmp: s.string().temp() })) });
+    expect(Reply.llmProblems()).toEqual([
+      "when: s.date() cannot be in an LLM reply (JSON has no dates); ask for s.string() and convert with a FunctionGen.",
+      "people[].tmp: .temp() fields cannot be in an LLM reply (they are dropped from output records, which a reply is not).",
+    ]);
+    expect(() => new LLMStructuredGen({ model: "m", prompt: "Hi", schema: Reply })).toThrow(/schema cannot describe an LLM reply: when: s\.date\(\)/);
+    expect(s.object({ a: s.string() }).llmProblems()).toEqual([]);
   });
 
   it("rejects bad definitions when they are made", () => {

@@ -2,8 +2,9 @@ import { roundTo } from "./distributions";
 import { ConfigError } from "./errors";
 
 /**
- * A small schema builder for JSON from LLMs. One definition gives the static type, the runtime
- * check, the JSON Schema (for APIs) and the short shape + notes (for prompts), so they never drift:
+ * A small schema builder, for the data model of a tree and for JSON from LLMs. One definition gives
+ * the static type, the runtime check, the JSON Schema (for APIs) and the short shape + notes (for
+ * prompts), so they never drift:
  *
  *     const backStory = s.object({
  *       childhood: s.string({ description: "two sentences about where they grew up" }),
@@ -12,10 +13,8 @@ import { ConfigError } from "./errors";
  *     });
  *     type BackStory = Infer<typeof backStory>;
  *
- * To check a schema against an existing interface: `const backStory: Schema<BackStory> = s.object({...})`.
- *
- * Deliberately small: only what LLM APIs accept as JSON Schema. No refinements or transforms; a
- * schema that needs those has outgrown this builder (use zod).
+ * Deliberately small: no unions, maps, refinements or transforms. `s.date()` and `.temp()` are for
+ * data models only: an LLM reply schema may not contain them (`llmProblems()`).
  */
 export abstract class Schema<T> {
   /** Type only: the value type this schema checks. */
@@ -27,9 +26,23 @@ export abstract class Schema<T> {
     }
   }
 
-  /** Missing or null in a reply is allowed; the key is then left out of the value. */
-  optional(): OptionalSchema<T> {
+  /** May be missing (in a reply: missing or null); the key is then left out of the value. */
+  optional(): OptionalSchema<this> {
     return new OptionalSchema(this);
+  }
+
+  /**
+   * A field that is generated and can be read by other fields (refs), but is dropped from the output
+   * records: a value used on the way, like a customer used only in prompts. `Output<typeof X>` is
+   * the type without these fields.
+   */
+  temp(): TempSchema<this> {
+    return new TempSchema(this);
+  }
+
+  /** Why this schema cannot describe an LLM reply (e.g. it has a date), one line each; empty if it can. */
+  llmProblems(_path = ""): string[] {
+    return [];
   }
 
   /** The value if it fits, else a list of problems (`path: expected ..., got ...`) to show the LLM. */
@@ -175,6 +188,25 @@ export class BooleanSchema extends Schema<boolean> {
   }
 }
 
+/** A JavaScript `Date`. For data models only: JSON has no dates, so LLM reply schemas reject it. */
+export class DateSchema extends Schema<Date> {
+  check(value: unknown, path: string, issues: string[]): unknown {
+    return value instanceof Date && !Number.isNaN(value.getTime()) ? value : fail(issues, path, this.expected(), value);
+  }
+  override llmProblems(path = ""): string[] {
+    return [`${path || "reply"}: s.date() cannot be in an LLM reply (JSON has no dates); ask for s.string() and convert with a FunctionGen.`];
+  }
+  toJSONSchema(): Record<string, unknown> {
+    throw new ConfigError(this.llmProblems()[0]!);
+  }
+  shape() {
+    return "date";
+  }
+  expected() {
+    return "a valid Date";
+  }
+}
+
 export class EnumSchema<V extends string> extends Schema<V> {
   readonly values: readonly V[];
 
@@ -206,14 +238,16 @@ export interface ArraySchemaParams extends DescribedParams {
   maxItems?: number;
 }
 
-export class ArraySchema<T> extends Schema<T[]> {
+/** A list. Generic over the item schema (not just its value), so `Output` can drop temp fields inside items. */
+export class ArraySchema<I extends Schema<unknown>> extends Schema<Infer<I>[]> {
   readonly minItems: number | undefined;
   readonly maxItems: number | undefined;
 
-  constructor(readonly items: Schema<T>, { description, minItems, maxItems }: ArraySchemaParams) {
+  constructor(readonly items: I, { description, minItems, maxItems }: ArraySchemaParams) {
     super(description);
     if (!(items instanceof Schema)) throw new ConfigError(`s.array: the item schema must be made with s.*, got ${show(items)}.`);
     if (items instanceof OptionalSchema) throw new ConfigError(`s.array: items cannot be optional; use s.array(x).optional() for an optional list.`);
+    if (items instanceof TempSchema) throw new ConfigError(`s.array: items cannot be temp; use s.array(x).temp() for a temp list.`);
     checkBounds("array", minItems, maxItems, true);
     if ((minItems ?? 0) < 0) throw new ConfigError(`s.array: minItems must be >= 0, got ${minItems}.`);
     this.minItems = minItems;
@@ -228,6 +262,9 @@ export class ArraySchema<T> extends Schema<T[]> {
     }
     const out = value.map((item, i) => this.items.check(item, `${path}[${i}]`, issues));
     return issues.length === before ? out : undefined;
+  }
+  override llmProblems(path = ""): string[] {
+    return this.items.llmProblems(`${path}[]`);
   }
   toJSONSchema() {
     return this.withDescription({ type: "array", items: this.items.toJSONSchema(), minItems: this.minItems, maxItems: this.maxItems });
@@ -256,14 +293,21 @@ function plural(expected: string): string {
 }
 
 /** A field that may be missing (or null) in the reply. Made by `.optional()`. */
-export class OptionalSchema<T> extends Schema<T | undefined> {
-  constructor(readonly inner: Schema<T>) {
+export class OptionalSchema<S extends Schema<unknown>> extends Schema<Infer<S> | undefined> {
+  constructor(readonly inner: S) {
     super(inner.description);
     if (inner instanceof OptionalSchema) throw new ConfigError(`schema: .optional() was called twice.`);
   }
 
   check(value: unknown, path: string, issues: string[]): unknown {
     return value === null || value === undefined ? undefined : this.inner.check(value, path, issues);
+  }
+  /** `.optional().temp()` is the way round: the temp marker goes outside. */
+  override temp(): TempSchema<this> {
+    return new TempSchema(this);
+  }
+  override llmProblems(path = ""): string[] {
+    return this.inner.llmProblems(path);
   }
   toJSONSchema() {
     // Strict APIs require every key; "optional" is spelled as "or null".
@@ -278,14 +322,72 @@ export class OptionalSchema<T> extends Schema<T | undefined> {
   }
 }
 
+/**
+ * A field generated and readable by refs, but dropped from output records. Made by `.temp()`; to
+ * combine with optional, write `.optional().temp()`.
+ */
+export class TempSchema<S extends Schema<unknown>> extends Schema<Infer<S>> {
+  constructor(readonly inner: S) {
+    super(inner.description);
+    if (inner instanceof TempSchema) throw new ConfigError(`schema: .temp() was called twice.`);
+  }
+
+  override optional(): never {
+    throw new ConfigError(`schema: write .optional().temp(), not .temp().optional().`);
+  }
+  override temp(): never {
+    throw new ConfigError(`schema: .temp() was called twice.`);
+  }
+  check(value: unknown, path: string, issues: string[]): unknown {
+    return this.inner.check(value, path, issues);
+  }
+  override llmProblems(path = ""): string[] {
+    return [`${path || "reply"}: .temp() fields cannot be in an LLM reply (they are dropped from output records, which a reply is not).`];
+  }
+  toJSONSchema(): Record<string, unknown> {
+    throw new ConfigError(this.llmProblems()[0]!);
+  }
+  shape(indent: string) {
+    return this.inner.shape(indent);
+  }
+  expected() {
+    return this.inner.expected();
+  }
+}
+
+const isOptional = (field: Schema<unknown>) =>
+  field instanceof OptionalSchema || (field instanceof TempSchema && field.inner instanceof OptionalSchema);
+
 type Fields = Record<string, Schema<unknown>>;
 type Simplify<T> = { [K in keyof T]: T[K] } & {};
-type OptionalKeys<F extends Fields> = { [K in keyof F]: F[K] extends OptionalSchema<any> ? K : never }[keyof F];
+/** The schema under a `.temp()` marker. */
+type Unmarked<S> = S extends TempSchema<infer I> ? I : S;
+type OptionalKeys<F extends Fields> = { [K in keyof F]: Unmarked<F[K]> extends OptionalSchema<any> ? K : never }[keyof F];
+type TempKeys<F extends Fields> = { [K in keyof F]: F[K] extends TempSchema<any> ? K : never }[keyof F];
 
-/** The value type of an object schema: optional fields become optional keys. */
+/** The value type of an object schema: optional fields become optional keys. Temp fields are included. */
 export type ObjectValue<F extends Fields> = Simplify<
   { [K in Exclude<keyof F, OptionalKeys<F>>]: Infer<F[K]> } & { [K in OptionalKeys<F>]?: Exclude<Infer<F[K]>, undefined> }
 >;
+
+/**
+ * The type of output records: `Infer<typeof X>` without the `.temp()` fields, at every depth
+ * (nested objects and list items too). `Infer` is what refs see; `Output` is what `preview` returns.
+ */
+export type Output<S> =
+  S extends ObjectSchema<infer F>
+    ? Simplify<
+        { [K in Exclude<keyof F, OptionalKeys<F> | TempKeys<F>>]: Output<F[K]> } & {
+          [K in Exclude<OptionalKeys<F>, TempKeys<F>>]?: Exclude<Output<Unmarked<F[K]>>, undefined>;
+        }
+      >
+    : S extends ArraySchema<infer I>
+      ? Output<I>[]
+      : S extends OptionalSchema<infer I>
+        ? Output<I> | undefined
+        : S extends Schema<infer T>
+          ? T
+          : never;
 
 export class ObjectSchema<F extends Fields> extends Schema<ObjectValue<F>> {
   readonly fields: Readonly<F>;
@@ -314,7 +416,7 @@ export class ObjectSchema<F extends Fields> extends Schema<ObjectValue<F>> {
     let missing = false;
     for (const [key, field] of Object.entries(this.fields)) {
       const at = path ? `${path}.${key}` : key;
-      if (!Object.hasOwn(record, key) && !(field instanceof OptionalSchema)) {
+      if (!Object.hasOwn(record, key) && !isOptional(field)) {
         issues.push(`${at}: missing`);
         missing = true;
         continue;
@@ -328,6 +430,20 @@ export class ObjectSchema<F extends Fields> extends Schema<ObjectValue<F>> {
       }
     }
     return issues.length === before ? out : undefined;
+  }
+
+  override llmProblems(path = ""): string[] {
+    return Object.entries(this.fields).flatMap(([key, field]) => field.llmProblems(path ? `${path}.${key}` : key));
+  }
+
+  /** The keys of `.temp()` fields, at this level. */
+  get tempKeys(): string[] {
+    return Object.keys(this.fields).filter((k) => this.fields[k] instanceof TempSchema);
+  }
+
+  /** The keys that may be missing (`.optional()`, also under `.temp()`). */
+  get optionalKeys(): string[] {
+    return Object.keys(this.fields).filter((k) => isOptional(this.fields[k]!));
   }
 
   toJSONSchema() {
@@ -377,6 +493,7 @@ export const s = {
   integer: (params: NumberSchemaParams = {}) => new NumberSchema(true, params),
   boolean: (params: DescribedParams = {}) => new BooleanSchema(params.description),
   enum: <const V extends string>(values: readonly V[], params: DescribedParams = {}) => new EnumSchema<V>(values, params),
-  array: <T>(items: Schema<T>, params: ArraySchemaParams = {}) => new ArraySchema<T>(items, params),
+  date: (params: DescribedParams = {}) => new DateSchema(params.description),
+  array: <I extends Schema<unknown>>(items: I, params: ArraySchemaParams = {}) => new ArraySchema<I>(items, params),
   object: <F extends Fields>(fields: F, params: DescribedParams = {}) => new ObjectSchema<F>(fields, params),
 };

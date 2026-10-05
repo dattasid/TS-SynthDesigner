@@ -67,6 +67,7 @@ export {
 export {
   ArraySchema,
   BooleanSchema,
+  DateSchema,
   EnumSchema,
   NumberSchema,
   ObjectSchema,
@@ -74,12 +75,14 @@ export {
   s,
   Schema,
   StringSchema,
+  TempSchema,
   type ArraySchemaParams,
+  type DecimalSchemaParams,
   type DescribedParams,
   type Infer,
-  type DecimalSchemaParams,
   type NumberSchemaParams,
   type ObjectValue,
+  type Output,
 } from "./schema";
 export { create, type CreateParams, type CreateResults } from "./create";
 export { preview, previewSync, type PreviewParams, type PreviewResults } from "./preview";
