@@ -18,6 +18,7 @@ import {
   reasoningOf,
   refs,
   rootRefs,
+  s,
   traceOf,
   TreeGen,
 } from "../src/index";
@@ -148,24 +149,27 @@ describe("Provider", () => {
   });
 });
 
-interface Person {
-  name: string;
-  age: number;
-  occupation: string;
-  education: { university: string; city: string };
-  bio: string;
-  bioLength: number;
-}
+const Education = s.object({ university: s.string(), city: s.string() });
+const Person = s.object({
+  name: s.string(),
+  age: s.integer(),
+  occupation: s.string(),
+  education: Education,
+  bio: s.string(),
+  bioLength: s.integer(),
+});
 
-const p = rootRefs<Person>("person");
+const p = rootRefs(Person);
 
 const personGen = (bio: LLMTextGen) =>
-  new TreeGen<Person>({
+  new TreeGen({
+    schema: Person,
     fields: {
       name: new CategorySamplerGen({ values: ["Ada", "Linus", "Grace"] }),
       age: new NumberSamplerGen({ type: "uniform", low: 20, high: 60, integer: true }),
       occupation: new CategorySamplerGen({ values: ["engineer", "teacher"] }),
-      education: new TreeGen<Person["education"]>({
+      education: new TreeGen({
+        schema: Education,
         fields: {
           university: new CategorySamplerGen({ values: ["MIT", "ETH"] }),
           city: new CategorySamplerGen({ values: ["Boston", "Zurich"] }),
@@ -260,7 +264,7 @@ describe("LLMTextGen", () => {
     const { records } = await preview({ gen: joke, numRecords: 2, providers: { mock }, models: { fast: { provider: "mock", model: "m" } } });
     expect(records).toEqual(["Why did the chicken...", "Why did the chicken..."]);
 
-    expect(() => `Bio for ${p.name}`).toThrow(/person\.name is a ref, not a value.*use the prompt`\.\.\.` tag/);
+    expect(() => `Bio for ${p.name}`).toThrow(/root\.name is a ref, not a value.*use the prompt`\.\.\.` tag/);
   });
 
   it("{{ }} (DataDesigner's Jinja syntax) is an error, in any prompt form", () => {
@@ -279,14 +283,15 @@ describe("LLMTextGen", () => {
   });
 
   it("reasoningOf puts the model's reasoning in another field; traceOf reads any field's trace", async () => {
-    interface Answer {
-      question: string;
-      answer: string;
-      answerReasoning?: string;
-      reasoningWords: number;
-    }
-    const a = rootRefs<Answer>("answer");
-    const gen = new TreeGen<Answer>({
+    const Answer = s.object({
+      question: s.string(),
+      answer: s.string(),
+      answerReasoning: s.string().optional(),
+      reasoningWords: s.integer(),
+    });
+    const a = rootRefs(Answer);
+    const gen = new TreeGen({
+      schema: Answer,
       id: "answer",
       fields: {
         question: new CategorySamplerGen({ values: ["Why is the sky blue?"] }),
@@ -306,14 +311,18 @@ describe("LLMTextGen", () => {
     // No reasoning sent, or a field that is not an LLM field: undefined.
     const quiet = await preview({ gen, numRecords: 1, ...setup, providers: { mock: new MockProvider({ respond: () => "Scattering." }) } });
     expect(quiet.records[0]!.answerReasoning).toBeUndefined();
-    const fromSampler = new TreeGen<Pick<Answer, "question" | "answerReasoning">>({
+    const fromSampler = new TreeGen({
+      schema: Answer.pick("question", "answerReasoning"),
       fields: { question: new CategorySamplerGen({ values: ["Why?"] }), answerReasoning: reasoningOf(a.question) },
     });
     expect((await preview({ gen: fromSampler, numRecords: 1 })).records[0]!.answerReasoning).toBeUndefined();
 
     // traceOf reads one field, not an object.
-    const nested = new TreeGen<{ p: { q: string }; r?: string }>({
-      fields: { p: new TreeGen({ fields: { q: new CategorySamplerGen({ values: ["x"] }) } }), r: reasoningOf(refs<{ p: { q: string } }>().p) },
+    const Inner = s.object({ q: s.string() });
+    const Outer = s.object({ p: Inner, r: s.string().optional() });
+    const nested = new TreeGen({
+      schema: Outer,
+      fields: { p: new TreeGen({ schema: Inner, fields: { q: new CategorySamplerGen({ values: ["x"] }) } }), r: reasoningOf(refs(Outer).p) },
     });
     expect(() => Plan.compile(nested)).toThrow("field 'r' reads traceOf(p) (input 'trace'), which is an object; traceOf reads one whole field.");
     expect(() => traceOf(traceOf(a.answer))).toThrow(/traceOf takes a ref to a field/);
@@ -339,7 +348,7 @@ export function compileErrors(): void {
   // @ts-expect-error 'nmae' is not a field of Person.
   prompt`Bio for ${p.nmae}`;
   // @ts-expect-error an LLMTextGen produces text, but age is a number.
-  new TreeGen<Pick<Person, "age">>({ fields: { age: bioGen } });
+  new TreeGen({ schema: Person.pick("age"), fields: { age: bioGen } });
   // @ts-expect-error reasoning may be missing, so its field must be optional (or `string | undefined`).
-  new TreeGen<{ bio: string; bioReasoning: string }>({ fields: { bio: bioGen, bioReasoning: reasoningOf(p.bio) } });
+  new TreeGen({ schema: s.object({ ...Person.pick("bio").fields, bioReasoning: s.string() }), fields: { bio: bioGen, bioReasoning: reasoningOf(p.bio) } });
 }

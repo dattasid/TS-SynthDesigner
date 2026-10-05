@@ -6,23 +6,21 @@ import {
   NumberSamplerGen,
   previewSync,
   rootRefs,
+  s,
   TreeGen,
   type BoundGen,
 } from "../src/index";
 
-interface Job {
-  country: string;
-  occupation: string;
-  bonus?: number | null;
-}
+const Job = s.object({ country: s.string(), occupation: s.string(), bonus: s.number().optional() });
 
-const p = rootRefs<Job>("job");
+const p = rootRefs(Job);
 const occuGen = new CategorySamplerGen({ values: ["doctor", "lawyer", "not_allowed_canada"] });
 const country = new CategorySamplerGen({ values: ["Canada", "Japan"] });
 
 describe("ConditionalRejectionResamplerGen", () => {
   it("redraws until accept() says yes, reading other fields", () => {
-    const job = new TreeGen<Job>({
+    const job = new TreeGen({
+      schema: Job,
       fields: {
         country,
         occupation: ConditionalRejectionResamplerGen.bound({
@@ -41,7 +39,7 @@ describe("ConditionalRejectionResamplerGen", () => {
       childGen: occuGen,
       accept: (value, { country }: { country: string }) => !(country === "Canada" && value === "not_allowed_canada"),
     });
-    const again = new TreeGen<Job>({ fields: { country, occupation: noCanadaOnly.bind({ country: p.country }) } });
+    const again = new TreeGen({ schema: Job, fields: { country, occupation: noCanadaOnly.bind({ country: p.country }) } });
     expect(previewSync({ gen: again, numRecords: 500, seed: 1 }).records).toEqual(records);
   });
 
@@ -50,7 +48,8 @@ describe("ConditionalRejectionResamplerGen", () => {
       new ConditionalRejectionResamplerGen({ childGen: occuGen, accept: () => false, maxAttempts: 3, onExhausted });
 
     const bonusGen = new NumberSamplerGen({ type: "uniform", low: 0, high: 10, integer: true });
-    const fail = new TreeGen<Job>({
+    const fail = new TreeGen({
+      schema: Job,
       fields: {
         country,
         occupation: ConditionalRejectionResamplerGen.bound({ childGen: occuGen, inputs: {}, accept: () => false, maxAttempts: 3 }),
@@ -62,7 +61,8 @@ describe("ConditionalRejectionResamplerGen", () => {
     expect(occuGen.values).toContain(previewSync({ gen: never("keepLast"), numRecords: 1, seed: 1 }).records[0]);
 
     // default without defaultValue: the text "None", which fits a string field as is.
-    const noneJob = new TreeGen<Job>({
+    const noneJob = new TreeGen({
+      schema: Job,
       fields: {
         country,
         occupation: ConditionalRejectionResamplerGen.bound({ childGen: occuGen, inputs: {}, accept: () => false, onExhausted: "default" }),
@@ -70,20 +70,21 @@ describe("ConditionalRejectionResamplerGen", () => {
     });
     expect(previewSync({ gen: noneJob, numRecords: 1, seed: 1 }).records[0]!.occupation).toBe("None");
 
-    // A number field needs its own default: here null, which bonus allows.
-    const nullBonus = ConditionalRejectionResamplerGen.bound({
+    // A number field needs its own default: here 0.
+    const zeroBonus = ConditionalRejectionResamplerGen.bound({
       childGen: bonusGen,
       inputs: {},
       accept: (bonus) => bonus > 100,
       onExhausted: "default",
-      defaultValue: null,
+      defaultValue: 0,
     });
-    expectTypeOf(nullBonus).toEqualTypeOf<BoundGen<number | null>>();
-    const withBonus = new TreeGen<Job>({ fields: { country, occupation: occuGen, bonus: nullBonus } });
-    expect(previewSync({ gen: withBonus, numRecords: 1, seed: 1 }).records[0]!.bonus).toBeNull();
+    expectTypeOf(zeroBonus).toEqualTypeOf<BoundGen<number>>();
+    const withBonus = new TreeGen({ schema: Job, fields: { country, occupation: occuGen, bonus: zeroBonus } });
+    expect(previewSync({ gen: withBonus, numRecords: 1, seed: 1 }).records[0]!.bonus).toBe(0);
 
     // Any other default of the values' own type works too.
-    const job = new TreeGen<Job>({
+    const job = new TreeGen({
+      schema: Job,
       fields: {
         country,
         occupation: ConditionalRejectionResamplerGen.bound({
@@ -97,7 +98,8 @@ describe("ConditionalRejectionResamplerGen", () => {
     });
     expect(previewSync({ gen: job, numRecords: 1, seed: 1 }).records[0]!.occupation).toBe("unemployed");
 
-    new TreeGen<Job>({
+    new TreeGen({
+      schema: Job,
       fields: {
         country,
         occupation: occuGen,
@@ -106,7 +108,8 @@ describe("ConditionalRejectionResamplerGen", () => {
       },
     });
 
-    new TreeGen<Job>({
+    new TreeGen({
+      schema: Job,
       fields: {
         country,
         occupation: occuGen,

@@ -25,17 +25,15 @@ const backStory = s.object({
 });
 type BackStory = Infer<typeof backStory>;
 
-interface Person {
-  name: string;
-  backStory: BackStory;
-}
-const p = rootRefs<Person>("person");
+const Person = s.object({ name: s.string(), backStory });
+const p = rootRefs(Person);
 
 const story = (happiness: number) => JSON.stringify({ childhood: "By the sea.", happiness, mood: "calm" });
 
 function run(respond: (r: CompletionRequest) => string | { text: string; truncated?: boolean }, params: Partial<LLMStructuredGenParams<BackStory>> = {}) {
   const mock = new MockProvider({ respond });
-  const gen = new TreeGen<Person>({
+  const gen = new TreeGen({
+    schema: Person,
     fields: {
       name: new CategorySamplerGen({ values: ["Ana", "Ben"] }),
       backStory: new LLMStructuredGen({ model: "fast", prompt: prompt`Invent a backstory for ${p.name}.`, schema: backStory, ...params }),
@@ -105,11 +103,14 @@ describe("LLMStructuredGen", () => {
   it("reasoningOf gives the reasoning behind the accepted attempt", async () => {
     let n = 0;
     const mock = new MockProvider({ respond: () => (n++ === 0 ? { text: "{}", reasoning: "first try" } : { text: story(6), reasoning: "second try" }) });
-    const gen = new TreeGen<Person & { why?: string }>({
+    const PersonWhy = s.object({ name: s.string(), backStory, why: s.string().optional() });
+    const q = rootRefs(PersonWhy);
+    const gen = new TreeGen({
+      schema: PersonWhy,
       fields: {
         name: new CategorySamplerGen({ values: ["Ana"] }),
-        backStory: new LLMStructuredGen({ model: "fast", prompt: prompt`Invent a backstory for ${p.name}.`, schema: backStory }),
-        why: reasoningOf(p.backStory),
+        backStory: new LLMStructuredGen({ model: "fast", prompt: prompt`Invent a backstory for ${q.name}.`, schema: backStory }),
+        why: reasoningOf(q.backStory),
       },
     });
     const { records } = await preview({ gen, numRecords: 1, providers: { mock }, models: { fast: { provider: "mock", model: "m" } } });
@@ -174,7 +175,8 @@ describe("LLMStructuredGen", () => {
 
   it.skipIf(skipLive)("live: llama-3.1-8b on OpenRouter", async () => {
     const { records } = await preview({
-      gen: new TreeGen<Person>({
+      gen: new TreeGen({
+        schema: Person,
         fields: {
           name: new CategorySamplerGen({ values: ["Ana", "Ben", "Chen", "Dara"] }),
           backStory: new LLMStructuredGen({ model: "llama", prompt: prompt`Invent a short backstory for ${p.name}.`, schema: backStory }),
@@ -192,9 +194,9 @@ describe("LLMStructuredGen", () => {
 // Compile-time checks: never called.
 export function compileErrors(): void {
   const gen = new LLMStructuredGen({ model: "fast", prompt: "x", schema: backStory });
-  new TreeGen<Person>({ fields: { name: new CategorySamplerGen({ values: ["Ana"] }), backStory: gen } });
+  new TreeGen({ schema: Person, fields: { name: new CategorySamplerGen({ values: ["Ana"] }), backStory: gen } });
   // @ts-expect-error the schema's type is BackStory, but name is a string.
-  new TreeGen<Person>({ fields: { name: gen, backStory: gen } });
+  new TreeGen({ schema: Person, fields: { name: gen, backStory: gen } });
   // @ts-expect-error defaultValue must have the schema's type (mood is "calm" | "anxious").
   new LLMStructuredGen({ model: "fast", prompt: "x", schema: backStory, onFailure: "default", defaultValue: { childhood: "", happiness: 1, mood: "sad" } });
 }

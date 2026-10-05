@@ -1,7 +1,8 @@
 import type { Context } from "./context";
 import { ConfigError } from "./errors";
-import { BaseGen, BoundGen, refTarget, showRef, type Gen, type MaybePromise, type Ref } from "./gen";
+import { BaseGen, BoundGen, refFits, refTarget, showRef, type Gen, type MaybePromise, type Ref } from "./gen";
 import { Plan } from "./plan";
+import { ObjectSchema, OptionalSchema, TempSchema, type Infer, type Schema } from "./schema";
 
 /**
  * One Gen per key of `T`, whose output type matches that key's type.
@@ -10,25 +11,33 @@ import { Plan } from "./plan";
  */
 export type Fields<T> = { [K in keyof T]: Gen<T[K]> };
 
-export interface TreeGenParams<T> {
+/** Any object schema: what a TreeGen is made from. */
+export type AnyObjectSchema = ObjectSchema<any>;
+
+export interface TreeGenParams<S extends AnyObjectSchema> {
   id?: string;
-  fields: Fields<T>;
+  /** The data model: `s.object({...})`. Its type is what `fields` must match, and what refs see. */
+  schema: S;
+  /** One Gen per schema key (optional keys may be left out). */
+  fields: Fields<Infer<S>>;
 }
 
-export interface TreeCloneParams<T> {
+export interface TreeCloneParams<S extends AnyObjectSchema> {
   /** Defaults to the original's id. */
   id?: string;
   /** Gens to replace. Every other field keeps the original's Gen. */
-  fields?: Partial<Fields<T>>;
+  fields?: Partial<Fields<Infer<S>>>;
 }
 
-export interface TreeBuilderParams<T> {
+export interface TreeBuilderParams<S extends AnyObjectSchema> {
   id?: string;
-  /**
-   * Keys that must have a Gen by `build()`. Optional: types are erased at runtime, so without this
-   * list the builder cannot know which keys `T` has, and a missing field just won't appear in records.
-   */
-  requiredKeys?: readonly (keyof T & string)[];
+  schema: S;
+}
+
+/** The schema under `.temp()` and `.optional()`: what a field's value must fit. */
+export function fieldSchema(schema: Schema<unknown>): Schema<unknown> {
+  const unmarked = schema instanceof TempSchema ? schema.inner : schema;
+  return unmarked instanceof OptionalSchema ? unmarked.inner : unmarked;
 }
 
 type AnyGen = Gen<unknown, any>;
@@ -43,21 +52,29 @@ export function checkBound(gen: AnyGen, where: string, fail: (message: string) =
 }
 
 /**
- * Describes objects of type `T`: one Gen per field. A TreeGen is itself a Gen, so it can be a field
- * of another tree.
+ * Makes objects of a schema's type: one Gen per field. A TreeGen is itself a Gen, so it can be a field
+ * of another tree (whose schema has the same schema object at that key).
+ *
+ *     const Person = s.object({ name: s.string(), age: s.integer() });
+ *     type Person = Infer<typeof Person>;
+ *     const personGen = new TreeGen({ schema: Person, fields: { name: nameGen, age: ageGen } });
  *
  * It holds structure only. Generation is done by a `Plan`, which flattens the whole tree and orders
  * every field after the fields it reads. Fields may be declared in any order; the output keeps the
  * declaration order.
  */
-export class TreeGen<T extends object> extends BaseGen<T> {
-  readonly fields: Fields<T>;
-  private plan: Plan<T> | undefined;
+export class TreeGen<S extends AnyObjectSchema> extends BaseGen<Infer<S>> {
+  readonly schema: S;
+  readonly fields: Fields<Infer<S>>;
+  private plan: Plan<Infer<S>> | undefined;
 
-  constructor({ id, fields }: TreeGenParams<T>) {
+  constructor({ id, schema, fields }: TreeGenParams<S>) {
     super(id);
+    this.check(schema instanceof ObjectSchema, "schema must be an object schema, made with s.object({...}).");
+    this.schema = schema;
     this.fields = fields;
-    // Early errors: unknown refs and cycles among this tree's own fields. The plan checks the whole tree again.
+    // Early errors: fields vs schema, unknown refs and cycles among this tree's own fields. The plan
+    // checks the whole tree again.
     this.checkFields();
   }
 
@@ -66,43 +83,62 @@ export class TreeGen<T extends object> extends BaseGen<T> {
    *
    *     const kids = person.clone({ fields: { age: kidAgeGen } });
    */
-  clone({ id = this.id, fields = {} }: TreeCloneParams<T> = {}): TreeGen<T> {
-    return new TreeGen<T>({ id, fields: { ...this.fields, ...fields } as Fields<T> });
+  clone({ id = this.id, fields = {} }: TreeCloneParams<S> = {}): TreeGen<S> {
+    return new TreeGen<S>({ id, schema: this.schema, fields: { ...this.fields, ...fields } as Fields<Infer<S>> });
   }
 
   /**
    * A step-by-step alternative to the `fields` object, for loops, conditionals, or fields added later.
-   * Each `field()` call is still type-checked (the key must exist in `T`, the Gen must produce
-   * `T[key]`, inputs must be bound), but completeness is not checked at compile time.
+   * Each `field()` call is type-checked (the key must be in the schema, the Gen must produce its
+   * type, inputs must be bound); completeness is checked against the schema at `build()`.
    */
-  static builder<T extends object>(params: TreeBuilderParams<T> = {}): TreeBuilder<T> {
-    return new TreeBuilder<T>(params);
+  static builder<S extends AnyObjectSchema>(params: TreeBuilderParams<S>): TreeBuilder<S> {
+    return new TreeBuilder<S>(params);
   }
 
   /** Generates one object, running this tree's plan (compiled on first use, then reused). */
-  generate(_inputs: {}, ctx: Context): MaybePromise<T> {
-    this.plan ??= Plan.compile<T>(this);
+  generate(_inputs: {}, ctx: Context): MaybePromise<Infer<S>> {
+    this.plan ??= Plan.compile<Infer<S>>(this);
     return this.plan.run(ctx);
   }
 
   private checkFields(): void {
     const fields = this.fields as Record<string, AnyGen | undefined>;
     const names = Object.keys(fields).filter((n) => fields[n] !== undefined);
-    this.check(names.length > 0, "fields must not be empty.");
+    const schemaFields = this.schema.fields as Record<string, Schema<unknown>>;
+    const keys = Object.keys(schemaFields);
+    const unknown = names.filter((n) => !keys.includes(n));
+    this.check(unknown.length === 0, `field '${unknown[0]}' is not in the schema. Schema keys: ${keys.join(", ")}.`);
+    const optional = this.schema.optionalKeys;
+    const missing = keys.filter((k) => !names.includes(k) && !optional.includes(k));
+    this.check(missing.length === 0, `missing fields: ${missing.join(", ")}.`);
 
     const dependsOn = new Map<string, Set<string>>();
     for (const name of names) {
       const gen = fields[name];
       this.check(typeof gen?.generate === "function", `field '${name}' is not a Gen.`);
       checkBound(gen!, `field '${name}'`, (message) => this.check(false, message));
+      if (gen instanceof TreeGen) {
+        this.check(
+          gen.schema === fieldSchema(schemaFields[name]!),
+          `field '${name}' is a TreeGen made from another schema; its schema must be the very object at '${name}' in this tree's schema.`,
+        );
+      }
       const refs: Readonly<Record<string, Ref<unknown>>> = gen instanceof BoundGen ? gen.refs : {};
       const targets = new Set<string>();
       for (const [input, ref] of Object.entries(refs)) {
         // Only sibling refs can be checked here; parent and root refs depend on where the tree is placed,
         // so the plan checks them.
-        const { scope, path } = refTarget(ref)!;
-        if (scope !== "self") continue;
-        const target = path[0]!;
+        const refAt = refTarget(ref)!;
+        if (refAt.scope !== "self") continue;
+        const target = refAt.path[0]!;
+        // Unknown key first: a better message than "another schema" for a misspelled field.
+        if (names.includes(target)) {
+          this.check(
+            refFits(refAt, this.schema),
+            `field '${name}' reads '${showRef(ref)}' (input '${input}') with refs made from another schema; use refs() of this tree's schema.`,
+          );
+        }
         this.check(
           names.includes(target),
           `field '${name}' reads '${showRef(ref)}' (input '${input}'), but '${target}' is not a field of this tree. ` +
@@ -127,25 +163,23 @@ export class TreeGen<T extends object> extends BaseGen<T> {
 }
 
 /** Made by `TreeGen.builder()`. */
-export class TreeBuilder<T extends object> {
-  private readonly fields: Partial<Fields<T>> = {};
+export class TreeBuilder<S extends AnyObjectSchema> {
+  private readonly fields: Partial<Fields<Infer<S>>> = {};
 
-  constructor(private readonly params: TreeBuilderParams<T>) {}
+  constructor(private readonly params: TreeBuilderParams<S>) {}
 
   /** Adds a field. Adding the same name twice throws; use `TreeGen.clone()` to replace a Gen. */
-  field<K extends keyof T & string>({ name, gen }: { name: K; gen: Gen<T[K]> }): this {
+  field<K extends keyof Infer<S> & string>({ name, gen }: { name: K; gen: Gen<Infer<S>[K]> }): this {
     if (Object.hasOwn(this.fields, name)) {
       throw new ConfigError(`${this.describe()}: field '${name}' was already added.`);
     }
-    this.fields[name] = gen as Fields<T>[K];
+    this.fields[name] = gen as Fields<Infer<S>>[K];
     return this;
   }
 
-  /** Builds the TreeGen. Refs and cycles are checked here, and `requiredKeys` if given. */
-  build(): TreeGen<T> {
-    const missing = (this.params.requiredKeys ?? []).filter((k) => !Object.hasOwn(this.fields, k));
-    if (missing.length > 0) throw new ConfigError(`${this.describe()}: missing fields: ${missing.join(", ")}.`);
-    return new TreeGen<T>({ id: this.params.id, fields: this.fields as Fields<T> });
+  /** Builds the TreeGen. Missing fields (from the schema), refs and cycles are checked here. */
+  build(): TreeGen<S> {
+    return new TreeGen<S>({ id: this.params.id, schema: this.params.schema, fields: this.fields as Fields<Infer<S>> });
   }
 
   private describe(): string {

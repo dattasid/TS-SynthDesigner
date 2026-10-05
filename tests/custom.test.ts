@@ -12,21 +12,19 @@ import {
   previewSync,
   prompt,
   rootRefs,
+  s,
   TreeGen,
+  type Infer,
 } from "../src/index";
 
-interface Order {
-  price: number;
-  qty: number;
-  total: number;
-  label: string;
-}
+const Order = s.object({ price: s.number(), qty: s.integer(), total: s.number(), label: s.string() });
 
 describe("FunctionGen", () => {
   it("is CustomGen under another name: same two forms, its own name in errors", () => {
-    const o = rootRefs<Order>("order");
+    const o = rootRefs(Order);
     const labelGen = new FunctionGen({ fn: ({ qty }: { qty: number }) => `${qty} items` });
-    const order = new TreeGen<Order>({
+    const order = new TreeGen({
+      schema: Order,
       id: "order",
       fields: {
         price: new NumberSamplerGen({ type: "uniform", low: 1, high: 20, decimalPlaces: 2 }),
@@ -49,24 +47,17 @@ describe("FunctionGen", () => {
   });
 });
 
-interface Scene {
-  setting: string;
-  mood: string;
-  props: string[];
-}
-
-interface Character {
-  scene: Scene;
-  role: string;
-  description: string;
-}
+const Scene = s.object({ setting: s.string(), mood: s.string(), props: s.array(s.string()) });
+type Scene = Infer<typeof Scene>;
+const Character = s.object({ scene: Scene, role: s.string(), description: s.string() });
 
 describe("ConstantGen", () => {
   const scene: Scene = { setting: "a lighthouse in a storm", mood: "tense", props: ["lantern", "logbook"] };
 
   it("gives every row the same value, typed by it; refs read into it", async () => {
-    const c = rootRefs<Character>("character");
-    const character = new TreeGen<Character>({
+    const c = rootRefs(Character);
+    const character = new TreeGen({
+      schema: Character,
       id: "character",
       fields: {
         scene: new ConstantGen({ value: scene }),
@@ -81,7 +72,8 @@ describe("ConstantGen", () => {
     }
     expect(records[0]!.scene).toBe(records[1]!.scene); // one shared copy
 
-    new TreeGen<Pick<Character, "scene">>({
+    new TreeGen({
+      schema: s.object({ scene: Scene }),
       // @ts-expect-error the value must fit the field: mood is missing
       fields: { scene: new ConstantGen({ value: { setting: "x", props: [] } }) },
     });

@@ -1,17 +1,18 @@
 import { base, de, en } from "@faker-js/faker";
 import { describe, expect, it } from "vitest";
 import { FAKER_DEFAULT_REF_DATE, FakerGen } from "../src/faker";
-import { CategorySamplerGen, ConfigError, Context, NumberSamplerGen, previewSync, refs, TreeGen } from "../src/index";
+import { CategorySamplerGen, ConfigError, Context, NumberSamplerGen, previewSync, refs, s, TreeGen, type Infer } from "../src/index";
 
-interface Customer {
-  sex: "male" | "female";
-  firstName: string;
-  lastName: string;
-  age: number;
-  birthDate: string;
-}
+const Customer = s.object({
+  sex: s.enum(["male", "female"]),
+  firstName: s.string(),
+  lastName: s.string(),
+  age: s.integer(),
+  birthDate: s.string(),
+});
+type Customer = Infer<typeof Customer>;
 
-const c = refs<Customer>();
+const c = refs(Customer);
 
 const customerFields = {
   sex: new CategorySamplerGen<Customer["sex"]>({ values: ["male", "female"] }),
@@ -23,7 +24,7 @@ const customerFields = {
     fn: (f, { age }) => f.date.birthdate({ mode: "age", min: age, max: age }).toISOString().slice(0, 10),
   }),
 };
-const customer = new TreeGen<Customer>({ id: "customer", fields: customerFields });
+const customer = new TreeGen({ id: "customer", schema: Customer, fields: customerFields });
 
 describe("FakerGen", () => {
   it("is reproducible from the run's seed, and draws from its field's own stream", () => {
@@ -31,8 +32,11 @@ describe("FakerGen", () => {
     expect(previewSync({ gen: customer, numRecords: 20, seed: 7 }).records).toEqual(records);
     expect(previewSync({ gen: customer, numRecords: 20, seed: 8 }).records).not.toEqual(records);
 
-    // Another field drawing more randomness does not move faker's values.
-    const busier = new TreeGen<Customer & { email: string }>({
+    // Another field drawing more randomness does not move faker's values. The schema is extended by
+    // spreading, so the fields made with refs(Customer) still fit.
+    const Busier = s.object({ ...Customer.fields, email: s.string() });
+    const busier = new TreeGen({
+      schema: Busier,
       fields: { ...customerFields, email: new FakerGen({ fn: (f) => f.internet.email() }) },
     });
     const withEmail = previewSync({ gen: busier, numRecords: 20, seed: 7 }).records;
@@ -53,7 +57,8 @@ describe("FakerGen", () => {
   });
 
   it("takes a locale and a reference date", () => {
-    const tree = new TreeGen<{ lastName: string; joined: string }>({
+    const tree = new TreeGen({
+      schema: s.object({ lastName: s.string(), joined: s.string() }),
       fields: {
         lastName: new FakerGen({ locale: [de, en, base], fn: (f) => f.person.lastName() }),
         joined: new FakerGen({ refDate: "2000-06-01", fn: (f) => f.date.past({ years: 1 }).toISOString() }),
@@ -74,11 +79,12 @@ describe("FakerGen", () => {
   });
 
   it("is typed by fn's return", () => {
-    new TreeGen<{ age: number }>({
+    new TreeGen({
+      schema: s.object({ age: s.integer() }),
       // @ts-expect-error a string Gen for a number field
       fields: { age: new FakerGen({ fn: (f) => f.person.firstName() }) },
     });
     // @ts-expect-error firstName takes "male" | "female", and sex is a plain string here
-    FakerGen.bound({ inputs: { sex: refs<{ sex: string }>().sex }, fn: (f, { sex }) => f.person.firstName(sex) });
+    FakerGen.bound({ inputs: { sex: refs(s.object({ sex: s.string() })).sex }, fn: (f, { sex }) => f.person.firstName(sex) });
   });
 });

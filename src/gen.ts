@@ -1,5 +1,6 @@
 import type { Context } from "./context";
 import { ConfigError } from "./errors";
+import { ObjectSchema, type Infer } from "./schema";
 
 /**
  * Where a ref's path starts:
@@ -13,8 +14,11 @@ export type RefScope = "self" | "parent" | "root";
 export interface RefTarget {
   readonly scope: RefScope;
   readonly path: readonly string[];
-  /** For `root` refs: the name given to `rootRefs`, e.g. "person". */
-  readonly rootName?: string;
+  /**
+   * The object schema the ref was made from (`refs(Customer)`). The plan checks it is the schema of
+   * the object the scope resolves to, so refs cannot silently read the wrong object.
+   */
+  readonly schema: ObjectSchema<any>;
   /** Made by `traceOf`: the ref reads the field's trace instead of its value. */
   readonly trace?: true;
 }
@@ -51,16 +55,16 @@ export function refTarget(value: unknown): RefTarget | undefined {
   return (value as { [REF_TARGET]?: RefTarget })[REF_TARGET];
 }
 
-/** For error messages: `person.education.city` (a root ref, by its name), `self.city`, `parent.country`. */
+/** For error messages: `root.education.city`, `self.city`, `parent.country`. */
 export function showRef(ref: unknown): string {
   const target = refTarget(ref);
   if (!target) return String(ref);
-  const path = [target.rootName ?? target.scope, ...target.path].join(".");
+  const path = [target.scope, ...target.path].join(".");
   return target.trace ? `traceOf(${path})` : path;
 }
 
-function makeRef(scope: RefScope, path: readonly string[], rootName?: string): unknown {
-  const target: RefTarget = Object.freeze({ scope, path: Object.freeze([...path]), ...(rootName !== undefined && { rootName }) });
+function makeRef(scope: RefScope, path: readonly string[], schema: ObjectSchema<any>): unknown {
+  const target: RefTarget = Object.freeze({ scope, path: Object.freeze([...path]), schema });
   const children = new Map<string, unknown>();
   // Each property access returns the ref one key deeper. Only refs are made here, while trees are
   // set up; the plan resolves them to paths once, so the Proxy costs nothing per record.
@@ -73,7 +77,7 @@ function makeRef(scope: RefScope, path: readonly string[], rootName?: string): u
       };
       if (typeof key === "symbol") return undefined;
       let child = children.get(key);
-      if (!child) children.set(key, (child = makeRef(scope, [...path, key], rootName)));
+      if (!child) children.set(key, (child = makeRef(scope, [...path, key], schema)));
       return child;
     },
     set() {
@@ -84,41 +88,56 @@ function makeRef(scope: RefScope, path: readonly string[], rootName?: string): u
 }
 
 /**
- * Refs to siblings: fields of the object `T` that holds the field being bound.
- *
- *     const person = refs<Person>();
- *     city: cityGen.bind({ category: person.country })
+ * Whether a ref made from `target.schema` may read `object`, a tree's schema: its first key must be
+ * the very same field schema there. The same schema, or one extended by spreading it
+ * (`s.object({ ...Customer.fields, email: s.string() })`), passes; another object does not.
  */
-export function refs<T>(): RefTree<T> {
-  return makeRef("self", []) as RefTree<T>;
+export function refFits(target: RefTarget, object: ObjectSchema<any>): boolean {
+  if (target.schema === object) return true;
+  const key = target.path[0];
+  return key !== undefined && Object.hasOwn(object.fields, key) && object.fields[key] === target.schema.fields[key];
 }
 
-/** Refs into `T`, the object that contains the object holding the field being bound (one level up). */
-export function parentRefs<T>(): RefTree<T> {
-  return makeRef("parent", []) as RefTree<T>;
+function checkSchema(fn: string, schema: unknown): void {
+  if (!(schema instanceof ObjectSchema)) {
+    throw new ConfigError(`${fn}() takes the object schema of the tree it reads, e.g. ${fn}(Person) with const Person = s.object({...}).`);
+  }
 }
 
 /**
- * Refs into `T`, the top-level record, from any depth. With a single root type, using these
- * everywhere is simplest: every ref is a path from the top.
+ * Refs to siblings: fields of the object that holds the field being bound, whose schema is `schema`.
  *
- *     const p = rootRefs<Person>("person");
+ *     const p = refs(Person);
+ *     city: cityGen.bind({ category: p.country })
+ *
+ * Typed by the schema, so a typo is a compile error. The plan checks the holding tree's schema is
+ * this very object, so the refs cannot silently read another tree's fields.
+ */
+export function refs<S extends ObjectSchema<any>>(schema: S): RefTree<Infer<S>> {
+  checkSchema("refs", schema);
+  return makeRef("self", [], schema) as RefTree<Infer<S>>;
+}
+
+/** Refs into the object one level up from the one holding the field: the tree whose schema is `schema`. */
+export function parentRefs<S extends ObjectSchema<any>>(schema: S): RefTree<Infer<S>> {
+  checkSchema("parentRefs", schema);
+  return makeRef("parent", [], schema) as RefTree<Infer<S>>;
+}
+
+/**
+ * Refs into the top-level record, from any depth: every ref is a path from the top. With one root
+ * type, using these everywhere is simplest.
+ *
+ *     const p = rootRefs(Person);
  *     univCity: cityGen.bind({ category: p.country })   // inside person.education
  *
- * The name stands for the root at runtime, where `<T>` is gone: errors show `person.country`, and the
- * plan checks it. All root refs of one plan must have the same name, and if the root tree has an `id`,
- * that name. Give the root tree `id: "person"` to catch a tree using these refs being nested in
- * another tree, where they would read that tree's fields.
- *
- * Create one `rootRefs` per project, for the top-level type (refs with the same name are
- * interchangeable, so helpers in other files can make their own). `<T>` itself is trusted: nothing
- * ties it to the name. For trees meant to be nested, use `refs` / `parentRefs`.
+ * The plan checks the root tree's schema is `schema`, so a tree using these refs cannot be nested in
+ * another tree by mistake. Refs from the same schema are interchangeable: helpers in other files can
+ * make their own. For trees meant to be nested, use `refs` / `parentRefs`.
  */
-export function rootRefs<T>(name: string): RefTree<T> {
-  if (typeof name !== "string" || !/^[A-Za-z_$][\w$]*$/.test(name)) {
-    throw new ConfigError(`rootRefs needs the root's name, an identifier like "person"; got ${JSON.stringify(name)}.`);
-  }
-  return makeRef("root", [], name) as RefTree<T>;
+export function rootRefs<S extends ObjectSchema<any>>(schema: S): RefTree<Infer<S>> {
+  checkSchema("rootRefs", schema);
+  return makeRef("root", [], schema) as RefTree<Infer<S>>;
 }
 
 /**
@@ -249,7 +268,7 @@ export class BoundGen<Out> extends BaseGen<Out> {
     }
     for (const [input, ref] of Object.entries(refs)) {
       const target = refTarget(ref);
-      this.check(target !== undefined, `input '${input}' must be a ref, e.g. rootRefs<Person>("person").country.`);
+      this.check(target !== undefined, `input '${input}' must be a ref, e.g. rootRefs(Person).country.`);
       this.check(target!.path.length > 0, `input '${input}' is a whole ${target!.scope} object; bind a field of it instead.`);
     }
   }

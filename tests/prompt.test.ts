@@ -10,22 +10,25 @@ import {
   preview,
   prompt,
   rootRefs,
+  s,
   TreeGen,
+  type Infer,
 } from "../src/index";
 
-interface Review {
-  ageRange: "18-25" | "25-50" | "50+";
-  stars: number;
-  product: string;
-  complaint?: string;
-  review: string;
-}
+const Review = s.object({
+  ageRange: s.enum(["18-25", "25-50", "50+"]),
+  stars: s.integer(),
+  product: s.string(),
+  complaint: s.string().optional(),
+  review: s.string(),
+});
+type Review = Infer<typeof Review>;
 
-const r = rootRefs<Review>("review");
+const r = rootRefs(Review);
 
-/** Renders with values given by field name: `{ stars: 1 }` fills `review.stars`. */
+/** Renders with values given by field name: `{ stars: 1 }` fills `root.stars`. */
 const renderWith = (p: ReturnType<typeof prompt>, values: Partial<Review>) =>
-  p.render((key) => values[key.replace("review.", "") as keyof Review]);
+  p.render((key) => values[key.replace("root.", "") as keyof Review]);
 
 const tone = match({
   inputs: { age: r.ageRange, stars: r.stars },
@@ -61,7 +64,8 @@ describe("match in prompts", () => {
   });
 
   it("the inputs and every branch's fields are the Gen's inputs, so the plan orders it after them", async () => {
-    const tree = new TreeGen<Review>({
+    const tree = new TreeGen({
+      schema: Review,
       id: "review",
       fields: {
         ageRange: new CategorySamplerGen<Review["ageRange"]>({ values: ["18-25", "25-50", "50+"] }),

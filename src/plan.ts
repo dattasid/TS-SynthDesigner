@@ -1,6 +1,7 @@
 import type { Context } from "./context";
 import { ConfigError, GenerationError } from "./errors";
-import { BoundGen, refTarget, showRef, type Gen, type MaybePromise, type Ref, type Trace } from "./gen";
+import { BoundGen, refFits, refTarget, showRef, type Gen, type MaybePromise, type Ref, type Trace } from "./gen";
+import type { ObjectSchema } from "./schema";
 import { checkBound, TreeGen } from "./tree";
 
 type AnyGen = Gen<unknown, any>;
@@ -103,7 +104,7 @@ export class Plan<T> {
 
     const objects: ObjectSlot[] = [];
     const steps: Step[] = [];
-    flatten(gen, [], -1, "", objects, steps, { name: gen.id, from: gen.id === undefined ? undefined : "the root tree's id" });
+    flatten(gen, [], -1, "", objects, steps, []);
     return new Plan<T>(objects, sortSteps(steps), undefined);
   }
 
@@ -259,28 +260,26 @@ function groupByLevel(steps: readonly Step[]): Step[][] {
   return levels;
 }
 
-/** Walks a tree depth-first, collecting object slots (parents first) and steps (declaration order). */
-/** The root's name for `rootRefs`: the root tree's id, else the first root ref's name; and where it came from. */
-interface RootName {
-  name: string | undefined;
-  from: string | undefined;
-}
-
-function flatten(tree: TreeGen<object>, path: Path, parent: number, key: string, objects: ObjectSlot[], steps: Step[], root: RootName): void {
+/**
+ * Walks a tree depth-first, collecting object slots (parents first) and steps (declaration order).
+ * `schemas` are the object schemas from the root down to `tree`'s, for checking where refs point.
+ */
+function flatten(tree: TreeGen<any>, path: Path, parent: number, key: string, objects: ObjectSlot[], steps: Step[], schemas: readonly ObjectSchema<any>[]): void {
   const fields = tree.fields as Record<string, AnyGen | undefined>;
   const names = Object.keys(fields).filter((n) => fields[n] !== undefined);
   const index = objects.length;
   objects.push({ path, template: Object.fromEntries(names.map((n) => [n, undefined])), parent, key });
+  const here = [...schemas, tree.schema];
 
   for (const name of names) {
     const gen = fields[name]!;
     const fieldPath = [...path, name];
     if (gen instanceof TreeGen) {
-      flatten(gen, fieldPath, index, name, objects, steps, root);
+      flatten(gen, fieldPath, index, name, objects, steps, here);
     } else if (gen instanceof BoundGen) {
       const inputs = Object.entries(gen.refs).map(([input, ref]) => ({
         name: input,
-        path: resolve(ref, path, fieldPath, input, root),
+        path: resolve(ref, path, fieldPath, input, here),
         trace: refTarget(ref)!.trace ? 0 : -1,
       }));
       steps.push({ path: fieldPath, gen: gen.gen, inputs, object: index, key: name, traceSlot: -1 });
@@ -293,30 +292,28 @@ function flatten(tree: TreeGen<object>, path: Path, parent: number, key: string,
   }
 }
 
-/** The absolute path a ref points to, given the path of the object holding the field. */
-function resolve(ref: Ref<unknown>, objectPath: Path, fieldPath: Path, input: string, root: RootName): Path {
+/**
+ * The absolute path a ref points to, given the path of the object holding the field. The object the
+ * scope lands on must have the schema the ref was made from: `schemas` runs from the root's schema
+ * down to the holding object's.
+ */
+function resolve(ref: Ref<unknown>, objectPath: Path, fieldPath: Path, input: string, schemas: readonly ObjectSchema<any>[]): Path {
   const target = refTarget(ref)!;
+  const where = `field '${show(fieldPath)}' reads '${showRef(ref)}' (input '${input}')`;
+  const expect = (schema: ObjectSchema<any>, object: string, fix: string) => {
+    if (!refFits(target, schema)) throw new ConfigError(`${where}, made from another schema than ${object}'s. ${fix}`);
+  };
   switch (target.scope) {
     case "self":
+      expect(schemas[schemas.length - 1]!, "its object", "Use refs() of the schema of the tree holding the field.");
       return [...objectPath, ...target.path];
     case "parent":
-      if (objectPath.length === 0) {
-        throw new ConfigError(`field '${show(fieldPath)}' reads '${showRef(ref)}' (input '${input}'), but its object is the root, so it has no parent.`);
-      }
+      if (objectPath.length === 0) throw new ConfigError(`${where}, but its object is the root, so it has no parent.`);
+      expect(schemas[schemas.length - 2]!, "its parent", "Use parentRefs() of the schema of the tree one level up.");
       return [...objectPath.slice(0, -1), ...target.path];
-    case "root": {
-      const name = target.rootName!;
-      if (root.name === undefined) {
-        root.name = name;
-        root.from = `field '${show(fieldPath)}'`;
-      } else if (name !== root.name) {
-        throw new ConfigError(
-          `field '${show(fieldPath)}' reads '${showRef(ref)}' (input '${input}'), but the root is '${root.name}' (from ${root.from}). ` +
-            `rootRefs("${name}") was made for another root type: is this tree nested in another one? Use refs/parentRefs in nested trees.`,
-        );
-      }
+    case "root":
+      expect(schemas[0]!, "the root", "Is this tree nested in another one? Use refs/parentRefs in trees meant to be nested.");
       return target.path;
-    }
   }
 }
 

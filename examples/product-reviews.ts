@@ -1,34 +1,37 @@
 // DataDesigner's first tutorial, "The Basics" (docs/notebook_source/1-the-basics.py): a product
 // review dataset. Same columns, values and prompts; run it with examples/product-reviews.run.ts.
 import { FakerGen } from "../src/faker";
-import { CategorySamplerGen, LLMTextGen, NumberSamplerGen, prompt, refs, rootRefs, SubCategorySamplerGen, TreeGen } from "../src/index";
+import { CategorySamplerGen, LLMTextGen, NumberSamplerGen, prompt, refs, rootRefs, s, SubCategorySamplerGen, TreeGen, type Infer } from "../src/index";
 
 // DataDesigner's person sampler gives a fixed set of columns; here the customer is a type of our
 // own, with only the fields we want.
-export interface Customer {
-  sex: "male" | "female";
-  firstName: string;
-  lastName: string;
-  age: number;
-  city: string;
-  state: string;
-}
+export const Customer = s.object({
+  sex: s.enum(["male", "female"]),
+  firstName: s.string(),
+  lastName: s.string(),
+  age: s.integer({ min: 18, max: 70 }),
+  city: s.string(),
+  state: s.string(),
+});
+export type Customer = Infer<typeof Customer>;
 
-export interface ProductReview {
-  productCategory: string;
-  productSubcategory: string;
-  targetAgeRange: string;
-  customer: Customer;
-  numberOfStars: number;
-  reviewStyle: string;
-  productName: string;
-  customerReview: string;
-}
+export const ProductReview = s.object({
+  productCategory: s.string(),
+  productSubcategory: s.string(),
+  targetAgeRange: s.string(),
+  customer: Customer,
+  numberOfStars: s.integer({ min: 1, max: 5 }),
+  reviewStyle: s.string(),
+  productName: s.string(),
+  customerReview: s.string(),
+});
+export type ProductReview = Infer<typeof ProductReview>;
 
-const c = refs<Customer>();
+const c = refs(Customer);
 
 // PersonFromFakerSamplerParams(age_range=[18, 70], locale="en_US"), as a tree of its own.
-export const customerGen = new TreeGen<Customer>({
+export const customerGen = new TreeGen({
+  schema: Customer,
   fields: {
     sex: new CategorySamplerGen<Customer["sex"]>({ values: ["male", "female"] }),
     firstName: FakerGen.bound({ inputs: { sex: c.sex }, fn: (f, { sex }) => f.person.firstName(sex) }),
@@ -40,11 +43,12 @@ export const customerGen = new TreeGen<Customer>({
   },
 });
 
-const r = rootRefs<ProductReview>("productReview");
+const r = rootRefs(ProductReview);
 
 /** Its LLM fields use the model nickname "writer"; the run script maps it to a model. */
-export const productReviewGen = new TreeGen<ProductReview>({
+export const productReviewGen = new TreeGen({
   id: "productReview",
+  schema: ProductReview,
   fields: {
     productCategory: new CategorySamplerGen({
       values: ["Electronics", "Clothing", "Home & Kitchen", "Books", "Home Office"],

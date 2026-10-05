@@ -5,8 +5,10 @@ import {
   GenerationError,
   previewSync,
   refs,
+  s,
   SubCategorySamplerGen,
   TreeGen,
+  type Infer,
 } from "../src/index";
 
 describe("category samplers", () => {
@@ -27,13 +29,11 @@ describe("category samplers", () => {
   });
 
   it("SubCategorySamplerGen picks from the list for its category's value", () => {
-    type Country = "Canada" | "France";
-    interface Place {
-      country: Country;
-      city: string;
-    }
-    const ref = refs<Place>();
-    const place = new TreeGen<Place>({
+    const Place = s.object({ country: s.enum(["Canada", "France"]), city: s.string() });
+    type Country = Infer<typeof Place>["country"];
+    const ref = refs(Place);
+    const place = new TreeGen({
+      schema: Place,
       fields: {
         // `city` is declared first but depends on `country`, so `country` is generated first.
         city: new SubCategorySamplerGen({
@@ -53,12 +53,10 @@ describe("category samplers", () => {
     expect(Object.keys(records[0]!)).toEqual(["city", "country"]); // declaration order is kept
 
     // When the category field is a plain string, a value with no entry fails at generation time.
-    interface Loose {
-      country: string;
-      city: string;
-    }
-    const loose = refs<Loose>();
-    const broken = new TreeGen<Loose>({
+    const Loose = s.object({ country: s.string(), city: s.string() });
+    const loose = refs(Loose);
+    const broken = new TreeGen({
+      schema: Loose,
       fields: {
         country: new CategorySamplerGen({ values: ["Canada", "Mexico"] }),
         city: new SubCategorySamplerGen({ values: { Canada: ["Toronto"] } }).bind({ category: loose.country }),
@@ -80,14 +78,12 @@ describe("category samplers", () => {
     expectTypeOf(inline).toEqualTypeOf<SubCategorySamplerGen<string, string>>();
     expectTypeOf(new CategorySamplerGen({ values: ["a", "b"] })).toEqualTypeOf<CategorySamplerGen<string>>();
 
-    interface Place {
-      country: string;
-      city: string;
-    }
-    const place = new TreeGen<Place>({
+    const Place = s.object({ country: s.string(), city: s.string() });
+    const place = new TreeGen({
+      schema: Place,
       fields: {
         country: new CategorySamplerGen({ values: Object.keys(cityMap) }),
-        city: cityGen.bind({ category: refs<Place>().country }),
+        city: cityGen.bind({ category: refs(Place).country }),
       },
     });
     for (const { country, city } of previewSync({ gen: place, numRecords: 50, seed: 1 }).records) {
@@ -114,17 +110,15 @@ describe("category samplers", () => {
     expect(share(geometric, "e")).toBeCloseTo(0.032, 1);
 
     // SubCategory: each list is skewed on its own, so the first value's share depends on the list's length.
-    interface Place {
-      country: string;
-      city: string;
-    }
-    const place = new TreeGen<Place>({
+    const Place = s.object({ country: s.string(), city: s.string() });
+    const place = new TreeGen({
+      schema: Place,
       fields: {
         country: new CategorySamplerGen({ values: ["Short", "Long"] }),
         city: new SubCategorySamplerGen({
           values: { Short: ["s1", "s2"], Long: ["l1", "l2", "l3", "l4", "l5", "l6", "l7", "l8", "l9", "l10"] },
           skew: "zipf",
-        }).bind({ category: refs<Place>().country }),
+        }).bind({ category: refs(Place).country }),
       },
     });
     const { records } = previewSync({ gen: place, numRecords: 20_000, seed: 2 });

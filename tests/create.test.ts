@@ -2,14 +2,12 @@ import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { CategorySamplerGen, ConfigError, create, CustomGen, GenerationError, NumberSamplerGen, preview, TreeGen } from "../src/index";
+import { CategorySamplerGen, ConfigError, create, CustomGen, GenerationError, NumberSamplerGen, preview, s, TreeGen } from "../src/index";
 
-interface Pet {
-  name: string;
-  age: number;
-}
-const pet = new TreeGen<Pet>({
+const Pet = s.object({ name: s.string(), age: s.integer() });
+const pet = new TreeGen({
   id: "pet",
+  schema: Pet,
   fields: {
     name: new CategorySamplerGen({ values: ["Rex", "Tom", "Kit"] }),
     age: new NumberSamplerGen({ type: "uniform", low: 1, high: 15, integer: true }),
@@ -43,7 +41,8 @@ describe("create", () => {
   it("a failing run keeps the batches written before the failure", async () => {
     const path = join(await tempDir(), "pets.jsonl");
     let calls = 0;
-    const flaky = new TreeGen<Pet>({
+    const flaky = new TreeGen({
+      schema: Pet,
       fields: {
         name: CustomGen.bound({
           inputs: {},

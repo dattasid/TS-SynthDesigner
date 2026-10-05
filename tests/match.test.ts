@@ -12,19 +12,20 @@ import {
   prompt,
   rootRefs,
   SubCategorySamplerGen,
+  s,
   TreeGen,
 } from "../src/index";
 
-interface Review {
-  ageRange: string;
-  stars: number;
-  category: string;
-  style: string;
-  item: string;
-  complaint?: string;
-}
+const Review = s.object({
+  ageRange: s.string(),
+  stars: s.integer(),
+  category: s.string(),
+  style: s.string(),
+  item: s.string(),
+  complaint: s.string().optional(),
+});
 
-const r = rootRefs<Review>("review");
+const r = rootRefs(Review);
 const styleGen = new CategorySamplerGen({ values: { rambling: 1, brief: 2, detailed: 2 } });
 
 const base = {
@@ -49,7 +50,7 @@ const base = {
 
 describe("MatchGen", () => {
   it("first case that holds wins, else otherwise; branches can be values, Gens or bound Gens", () => {
-    const tree = new TreeGen<Review>({ id: "review", fields: base });
+    const tree = new TreeGen({ schema: Review, id: "review", fields: base });
     const { records } = previewSync({ gen: tree, numRecords: 300, seed: 1 });
     for (const x of records) {
       if (x.ageRange === "18-25") expect(x.style).toBe("rambling");
@@ -65,7 +66,8 @@ describe("MatchGen", () => {
 
   it("without otherwise, skips: undefined, and only matching rows run the branch (e.g. call the LLM)", async () => {
     const mock = new MockProvider();
-    const tree = new TreeGen<Review>({
+    const tree = new TreeGen({
+      schema: Review,
       id: "review",
       fields: {
         ...base,
@@ -85,7 +87,8 @@ describe("MatchGen", () => {
     }
 
     // An unknown model in a branch fails before any call.
-    const typo = new TreeGen<Pick<Review, "stars" | "complaint">>({
+    const typo = new TreeGen({
+      schema: Review.pick("stars", "complaint"),
       fields: {
         stars: base.stars,
         complaint: new MatchGen({ inputs: { stars: r.stars }, cases: [{ when: () => true, then: new LLMTextGen({ model: "nope", prompt: "Hi" }) }] }),
@@ -98,7 +101,8 @@ describe("MatchGen", () => {
 
   it("each branch has its own random stream: changing one branch leaves the others' values alone", () => {
     const noisy = (otherwise: CategorySamplerGen) =>
-      new TreeGen<Pick<Review, "stars" | "item">>({
+      new TreeGen({
+        schema: Review.pick("stars", "item"),
         fields: {
           stars: base.stars,
           item: new MatchGen({
@@ -119,11 +123,12 @@ describe("MatchGen", () => {
     const withDefault = new MatchGen({ inputs: { s: r.stars }, cases: [{ when: ({ s }) => s < 3, then: styleGen }], otherwise: "None" });
     expectTypeOf(withDefault).toEqualTypeOf<MatchGen<string>>();
 
-    new TreeGen<Pick<Review, "stars" | "style">>({
+    new TreeGen({
+      schema: Review.pick("stars", "style"),
       // @ts-expect-error style is a required string, and without otherwise the value can be undefined
       fields: { stars: base.stars, style: skip },
     });
-    new TreeGen<Pick<Review, "stars" | "style">>({ fields: { stars: base.stars, style: withDefault } });
+    new TreeGen({ schema: Review.pick("stars", "style"), fields: { stars: base.stars, style: withDefault } });
 
     // @ts-expect-error stars is a number: comparing it to a string can never hold
     new MatchGen({ inputs: { s: r.stars }, cases: [{ when: ({ s }) => s === "5", then: "x" }] });
@@ -133,7 +138,7 @@ describe("MatchGen", () => {
     const needsInput = new SubCategorySamplerGen({ values: { Books: ["a novel"] } });
     expect(() => new MatchGen({ inputs: { s: r.stars }, cases: [] })).toThrow(ConfigError);
     expect(() => new MatchGen({ inputs: { s: "stars" as never }, cases: [{ when: () => true, then: 1 }] })).toThrow(/input 's' must be a ref/);
-    expect(() => new MatchGen({ inputs: { s: r.stars }, cases: [{ when: () => true, then: new TreeGen<{ a: number }>({ fields: { a: base.stars } }) }] })).toThrow(
+    expect(() => new MatchGen({ inputs: { s: r.stars }, cases: [{ when: () => true, then: new TreeGen({ schema: s.object({ a: s.integer() }), fields: { a: base.stars } }) }] })).toThrow(
       /a TreeGen cannot be a branch/,
     );
     expect(() => new MatchGen({ inputs: { s: r.stars }, cases: [{ when: () => true, then: 1 }], otherwise: needsInput as never })).toThrow(/otherwise needs inputs \(category\) but is not bound/);

@@ -436,6 +436,18 @@ export class ObjectSchema<F extends Fields> extends Schema<ObjectValue<F>> {
     return Object.entries(this.fields).flatMap(([key, field]) => field.llmProblems(path ? `${path}.${key}` : key));
   }
 
+  /**
+   * A schema with only these fields, like TypeScript's `Pick`. The field schemas are the same objects,
+   * so refs made from this schema fit trees of the smaller one. (To add fields, spread:
+   * `s.object({ ...Person.fields, email: s.string() })`.)
+   */
+  pick<const K extends keyof F & string>(...keys: K[]): ObjectSchema<Pick<F, K>> {
+    for (const key of keys) {
+      if (!Object.hasOwn(this.fields, key)) throw new ConfigError(`pick: '${key}' is not a field. Fields: ${Object.keys(this.fields).join(", ")}.`);
+    }
+    return new ObjectSchema(Object.fromEntries(keys.map((k) => [k, this.fields[k]])) as Pick<F, K>, { description: this.description });
+  }
+
   /** The keys of `.temp()` fields, at this level. */
   get tempKeys(): string[] {
     return Object.keys(this.fields).filter((k) => this.fields[k] instanceof TempSchema);

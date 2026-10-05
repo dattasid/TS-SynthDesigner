@@ -28,24 +28,24 @@ import {
   type Infer,
 } from "../src/index";
 
-// Plain strings: the values can come from a hand-written list today and a data file tomorrow.
-interface Person {
-  name: string;
-  country: string;
-  city: string;
-  birthCountry: string;
-  birthCity: string;
-  age: number;
-  heightCm: number;
-}
+// The data model is a schema: one definition gives the type (Infer), the runtime check of every
+// record, and the refs. Plain strings: values can come from a hand-written list today and a data
+// file tomorrow.
+const Person = s.object({
+  name: s.string(),
+  country: s.string(),
+  city: s.string(),
+  birthCountry: s.string(),
+  birthCity: s.string(),
+  age: s.integer({ min: 0 }),
+  heightCm: s.number({ decimalPlaces: 1 }),
+});
+type Person = Infer<typeof Person>; // { name: string; country: string; ... }
 
-interface Pet {
-  name: string;
-  species: string;
-}
+const Pet = s.object({ name: s.string(), species: s.string() });
 
 it("a typed Person tree", async () => {
-  const refOfPerson = refs<Person>();
+  const refOfPerson = refs(Person);
 
   const countryGen = new CategorySamplerGen({ values: { Canada: 2, France: 1, Japan: 1 } });
   // A Gen with an input: its `category` is fed by whichever field it is bound to.
@@ -57,7 +57,8 @@ it("a typed Person tree", async () => {
     },
   });
 
-  const person = new TreeGen<Person>({
+  const person = new TreeGen({
+    schema: Person,
     id: "Person",
     fields: {
       name: new CategorySamplerGen({ values: ["John Smith", "Jane Doe"] }),
@@ -83,29 +84,29 @@ it("a typed Person tree", async () => {
 });
 
 it("the same tree, step by step", async () => {
-  // For loops, conditionals, or fields added later. Each field() is type-checked; completeness is
-  // checked at build() only for requiredKeys (types are erased, so the builder can't know them otherwise).
-  const b = TreeGen.builder<Pet>({ id: "Pet", requiredKeys: ["name", "species"] });
+  // For loops, conditionals, or fields added later. Each field() is type-checked; build() checks
+  // that every schema key has a Gen.
+  const b = TreeGen.builder({ schema: Pet, id: "Pet" });
   b.field({ name: "name", gen: new CategorySamplerGen({ values: ["Rex", "Tom"] }) });
   b.field({ name: "species", gen: new CategorySamplerGen({ values: ["dog", "cat"] }) });
   const pet = b.build();
   console.table((await preview({ gen: pet, numRecords: 3, seed: 1 })).records);
 });
 
-interface Student {
-  country: string;
-  education: { university: string; univCity: string };
-}
+const Education = s.object({ university: s.string(), univCity: s.string() });
+const Student = s.object({ country: s.string(), education: Education });
 
 it("reading a value from the top of the record", async () => {
   // student.education.univCity reads student.country. The plan generates country first.
-  const root = rootRefs<Student>("student");
+  const root = rootRefs(Student);
   const cityGen = new SubCategorySamplerGen({ values: { Canada: ["Toronto", "Montreal"], Japan: ["Kyoto"] } });
 
-  const student = new TreeGen<Student>({
+  const student = new TreeGen({
+    schema: Student,
     fields: {
       country: new CategorySamplerGen({ values: ["Canada", "Japan"] }),
-      education: new TreeGen<Student["education"]>({
+      education: new TreeGen({
+        schema: Education, // the very schema at Student.education
         fields: {
           university: new CategorySamplerGen({ values: ["State University", "Tech Institute"] }),
           univCity: cityGen.bind({ category: root.country }),
@@ -116,29 +117,23 @@ it("reading a value from the top of the record", async () => {
   console.log((await preview({ gen: student, numRecords: 3, seed: 3 })).records);
 });
 
-interface Worker {
-  age: number;
-  country: string;
-  education: { city: string };
-  occupation: string;
-  seniority: string;
-}
+const WorkerEducation = s.object({ city: s.string() });
+const Worker = s.object({
+  age: s.integer(),
+  country: s.string(),
+  education: WorkerEducation,
+  occupation: s.string(),
+  seniority: s.string(),
+});
 
 it("derived and constant fields: FunctionGen, ConstantGen", () => {
-  interface Scene {
-    setting: string;
-    mood: string;
-  }
-  interface Character {
-    scene: Scene;
-    firstName: string;
-    lastName: string;
-    fullName: string;
-  }
-  const c = rootRefs<Character>("character");
+  const Scene = s.object({ setting: s.string(), mood: s.string() });
+  const Character = s.object({ scene: Scene, firstName: s.string(), lastName: s.string(), fullName: s.string() });
+  const c = rootRefs(Character);
   // Made elsewhere: by another run with numRecords: 1, read from a file, or typed in.
-  const scene: Scene = { setting: "a lighthouse in a storm", mood: "tense" };
-  const character = new TreeGen<Character>({
+  const scene: Infer<typeof Scene> = { setting: "a lighthouse in a storm", mood: "tense" };
+  const character = new TreeGen({
+    schema: Character,
     fields: {
       scene: new ConstantGen({ value: scene }), // every row; refs read into it: c.scene.setting
       firstName: new CategorySamplerGen({ values: ["Ada", "Linus"] }),
@@ -151,7 +146,7 @@ it("derived and constant fields: FunctionGen, ConstantGen", () => {
 });
 
 it("custom Gens: plain functions, few types", async () => {
-  const p = rootRefs<Worker>("worker");
+  const p = rootRefs(Worker);
 
   // Reusable: type the parameter once; the output type is inferred from the returns (TypeScript
   // keeps the returned literals, which still fit the string field).
@@ -161,11 +156,13 @@ it("custom Gens: plain functions, few types", async () => {
   });
   expectTypeOf(occupationGen).toEqualTypeOf<CustomGen<"Student" | "Retired" | "Engineer", { age: number; country: string }>>();
 
-  const worker = new TreeGen<Worker>({
+  const worker = new TreeGen({
+    schema: Worker,
     fields: {
       age: new NumberSamplerGen({ type: "uniform", low: 18, high: 70, integer: true }),
       country: new CategorySamplerGen({ values: ["Canada", "Japan"] }),
-      education: new TreeGen<Worker["education"]>({
+      education: new TreeGen({
+        schema: WorkerEducation,
         fields: { city: new CategorySamplerGen({ values: ["Toronto", "Kyoto"] }) },
       }),
       occupation: occupationGen.bind({ age: p.age, country: p.country }),
@@ -187,18 +184,15 @@ it("custom Gens: plain functions, few types", async () => {
   for (const w of records) expect(w.seniority.startsWith(w.age < 30 ? "junior" : "senior")).toBe(true);
 });
 
-interface Customer {
-  sex: "male" | "female";
-  firstName: string;
-  lastName: string;
-  email: string;
-}
+const Customer = s.object({ sex: s.enum(["male", "female"]), firstName: s.string(), lastName: s.string(), email: s.string() });
+type Customer = Infer<typeof Customer>;
 
 it("names, emails, addresses: faker-js", async () => {
   // FakerGen has its own entry point ("ts-datadesigner/faker"), so faker loads only when used.
   // faker draws from the field's stream: the same seed gives the same people.
-  const c = refs<Customer>();
-  const customer = new TreeGen<Customer>({
+  const c = refs(Customer);
+  const customer = new TreeGen({
+    schema: Customer,
     fields: {
       sex: new CategorySamplerGen<Customer["sex"]>({ values: ["male", "female"] }),
       firstName: FakerGen.bound({ inputs: { sex: c.sex }, fn: (f, { sex }) => f.person.firstName(sex) }),
@@ -225,14 +219,15 @@ it("DataDesigner's tutorial: product reviews (examples/product-reviews.ts)", asy
 });
 
 it("conditional fields: MatchGen (DataDesigner's conditional params and skipped columns)", async () => {
-  interface Review {
-    ageRange: string;
-    stars: number;
-    style: string;
-    complaint?: string; // optional: skipped for happy customers
-  }
-  const r = rootRefs<Review>("review");
-  const review = new TreeGen<Review>({
+  const Review = s.object({
+    ageRange: s.string(),
+    stars: s.integer({ min: 1, max: 5 }),
+    style: s.string(),
+    complaint: s.string().optional(), // optional: skipped for happy customers
+  });
+  const r = rootRefs(Review);
+  const review = new TreeGen({
+    schema: Review,
     fields: {
       ageRange: new CategorySamplerGen({ values: ["18-25", "25-50", "50+"] }),
       stars: new NumberSamplerGen({ type: "uniform", low: 1, high: 5, integer: true }),
@@ -261,12 +256,8 @@ it("conditional fields: MatchGen (DataDesigner's conditional params and skipped 
 });
 
 it("conditional prompt text: match, in place of Jinja's {% if %}", () => {
-  interface Review {
-    ageRange: string;
-    stars: number;
-    product: string;
-  }
-  const r = rootRefs<Review>("review");
+  const Review = s.object({ ageRange: s.string(), stars: s.integer(), product: s.string() });
+  const r = rootRefs(Review);
   // Cases are tried in order. The inputs are typed from the refs: `stars` is a number here.
   const review = prompt`Write a review of ${r.product}. `
     .match({
@@ -279,19 +270,16 @@ it("conditional prompt text: match, in place of Jinja's {% if %}", () => {
     })
     .append(" Reply with only the review.");
   // A Prompt is text with holes; an LLM Gen fills them per row. Here by hand:
-  expect(review.render((key) => ({ "review.product": "Mug", "review.ageRange": "18-25", "review.stars": 4 })[key])).toBe(
+  expect(review.render((key) => ({ "root.product": "Mug", "root.ageRange": "18-25", "root.stars": 4 })[key])).toBe(
     "Write a review of Mug. Be informal and conversational. Reply with only the review.",
   );
 });
 
 it("an LLM field", async () => {
-  interface Profile {
-    name: string;
-    occupation: string;
-    bio: string;
-  }
-  const p = rootRefs<Profile>("profile");
-  const profile = new TreeGen<Profile>({
+  const Profile = s.object({ name: s.string(), occupation: s.string(), bio: s.string() });
+  const p = rootRefs(Profile);
+  const profile = new TreeGen({
+    schema: Profile,
     fields: {
       name: new CategorySamplerGen({ values: ["Ada", "Linus"] }),
       occupation: new CategorySamplerGen({ values: ["engineer", "teacher"] }),
@@ -319,12 +307,10 @@ it("an LLM field with a JSON reply", async () => {
     happiness: s.integer({ min: 1, max: 10 }),
     mood: s.enum(["calm", "anxious"]),
   });
-  interface Profile {
-    name: string;
-    backStory: Infer<typeof backStory>;
-  }
-  const p = rootRefs<Profile>("profile");
-  const profile = new TreeGen<Profile>({
+  const Profile = s.object({ name: s.string(), backStory }); // the reply schema is a field of the data model
+  const p = rootRefs(Profile);
+  const profile = new TreeGen({
+    schema: Profile,
     fields: {
       name: new CategorySamplerGen({ values: ["Ada", "Linus"] }),
       // The reply is parsed, checked against the schema (retried with the problems if invalid) and typed.
@@ -346,13 +332,14 @@ it("an LLM field with a JSON reply", async () => {
 });
 
 it("an LLM's reasoning in its own field", async () => {
-  interface Answer {
-    question: string;
-    answer: string;
-    answerReasoning?: string; // optional: only reasoning models on some providers send it
-  }
-  const a = rootRefs<Answer>("answer");
-  const qa = new TreeGen<Answer>({
+  const Answer = s.object({
+    question: s.string(),
+    answer: s.string(),
+    answerReasoning: s.string().optional(), // optional: only reasoning models on some providers send it
+  });
+  const a = rootRefs(Answer);
+  const qa = new TreeGen({
+    schema: Answer,
     fields: {
       question: new CategorySamplerGen({ values: ["Why is the sky blue?", "Why is grass green?"] }),
       answer: new LLMTextGen({ model: "thinker", prompt: prompt`Answer in one line: ${a.question}` }),
@@ -367,7 +354,8 @@ it("an LLM's reasoning in its own field", async () => {
 });
 
 it("writing records to a JSONL file", async () => {
-  const pet = new TreeGen<Pet>({
+  const pet = new TreeGen({
+    schema: Pet,
     id: "Pet",
     fields: {
       name: new CategorySamplerGen({ values: ["Rex", "Tom"] }),
@@ -389,7 +377,7 @@ it("a Gen on its own", () => {
 // `npm test` runs tsc first: each line below must be a compile error, and if one stops being
 // an error, the @ts-expect-error above it is "unused" and tsc fails the build.
 export function compileErrors(): void {
-  const ref = refs<Person>();
+  const ref = refs(Person);
 
   // @ts-expect-error 'nmae' is not a field of Person.
   ref.nmae;
@@ -402,12 +390,14 @@ export function compileErrors(): void {
   const age = new NumberSamplerGen({ type: "uniform", low: 18, high: 90, integer: true });
   const heightCm = new NumberSamplerGen({ type: "gaussian", mean: 170, stddev: 10 });
 
-  new TreeGen<Person>({
+  new TreeGen({
+    schema: Person,
     // @ts-expect-error heightCm has no Gen.
     fields: { name, country, city, birthCountry, birthCity, age },
   });
 
-  new TreeGen<Person>({
+  new TreeGen({
+    schema: Person,
     fields: {
       // @ts-expect-error name is a string, but a number Gen produces numbers.
       name: new NumberSamplerGen({ type: "uniform", low: 0, high: 1 }),
@@ -423,20 +413,21 @@ export function compileErrors(): void {
   });
 
   // @ts-expect-error builder fields are type-checked too: species is a string.
-  TreeGen.builder<Pet>().field({ name: "species", gen: heightCm });
+  TreeGen.builder({ schema: Pet }).field({ name: "species", gen: heightCm });
 
   // @ts-expect-error root refs are typed too: Student has no 'countryy'. Refs are plain property access, any depth.
-  rootRefs<Student>("student").countryy;
-  rootRefs<Student>("student").education.univCity; // fine
+  rootRefs(Student).countryy;
+  rootRefs(Student).education.univCity; // fine
 
-  const w = rootRefs<Worker>("worker");
+  const w = rootRefs(Worker);
   CustomGen.bound({
     inputs: { age: w.age },
     // @ts-expect-error age is a number (from the ref), so it has no toUpperCase.
     fn: ({ age }) => age.toUpperCase(),
   });
 
-  new TreeGen<Pick<Worker, "age" | "seniority">>({
+  new TreeGen({
+    schema: Worker.pick("age", "seniority"),
     fields: {
       age: new NumberSamplerGen({ type: "uniform", low: 18, high: 70, integer: true }),
       // @ts-expect-error the function returns a number, but seniority is a string.
@@ -471,7 +462,7 @@ export function compileErrors(): void {
 
   // A Gen keyed by Size only accepts a Size field: a plain string field could hold anything.
   const colorBySize = new SubCategorySamplerGen<Size>({ values: { S: ["red"], M: ["blue"], L: ["green"] } });
-  colorBySize.bind({ category: refs<{ size: Size }>().size }); // fine
+  colorBySize.bind({ category: refs(s.object({ size: s.enum(["S", "M", "L"]) })).size }); // fine
   // @ts-expect-error Ref<string> is not a Ref<Size>.
-  colorBySize.bind({ category: refs<{ size: string }>().size });
+  colorBySize.bind({ category: refs(s.object({ size: s.string() })).size });
 }
