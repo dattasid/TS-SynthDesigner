@@ -18,13 +18,15 @@ import {
   prompt,
   Provider,
   rootRefs,
-  s,
+  SchemaBuilder,
   SubCategorySamplerGen,
   TreeGen,
   type Infer,
   type Output,
 } from "../src/index";
 import { Customer, customerGen } from "./product-reviews";
+
+const s = SchemaBuilder;
 
 // The tutorial's model config: the LLM fields ask for "writer", and this says what it is.
 // temperature 1, top_p 0.95, max 2048 tokens, thinking off.

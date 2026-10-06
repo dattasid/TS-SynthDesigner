@@ -24,12 +24,14 @@ import {
   reasoningOf,
   refs,
   rootRefs,
-  s,
+  SchemaBuilder,
   SubCategorySamplerGen,
   TreeGen,
   type Infer,
   type Output,
 } from "../src/index";
+
+const s = SchemaBuilder;
 
 const providers = {
   openrouter: Provider.openRouter({ apiKey: existsSync("OPENROUTER_API_KEY") ? { file: "OPENROUTER_API_KEY" } : { env: "OPENROUTER_API_KEY" } }),

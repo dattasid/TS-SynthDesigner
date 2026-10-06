@@ -1,5 +1,7 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
-import { ConfigError, LLMStructuredGen, s, type Infer, type Output, type Schema } from "../src/index";
+import { ConfigError, LLMStructuredGen, SchemaBuilder, type Infer, type Output, type Schema } from "../src/index";
+
+const s = SchemaBuilder;
 
 const backStory = s.object({
   childhood: s.string({ description: "two sentences about where they grew up" }),
@@ -177,10 +179,10 @@ describe("schema builder", () => {
   it("an LLM reply schema may not contain dates or temp fields", () => {
     const Reply = s.object({ when: s.date(), people: s.array(s.object({ name: s.string(), tmp: s.string().temp() })) });
     expect(Reply.llmProblems()).toEqual([
-      "when: s.date() cannot be in an LLM reply (JSON has no dates); ask for s.string() and convert with a FunctionGen.",
+      "when: SchemaBuilder.date() cannot be in an LLM reply (JSON has no dates); ask for SchemaBuilder.string() and convert with a FunctionGen.",
       "people[].tmp: .temp() fields cannot be in an LLM reply (they are dropped from output records, which a reply is not).",
     ]);
-    expect(() => new LLMStructuredGen({ model: "m", prompt: "Hi", schema: Reply })).toThrow(/schema cannot describe an LLM reply: when: s\.date\(\)/);
+    expect(() => new LLMStructuredGen({ model: "m", prompt: "Hi", schema: Reply })).toThrow(/schema cannot describe an LLM reply: when: SchemaBuilder\.date\(\)/);
     expect(s.object({ a: s.string() }).llmProblems()).toEqual([]);
   });
 
@@ -190,7 +192,7 @@ describe("schema builder", () => {
     expect(() => s.enum([])).toThrow(ConfigError);
     expect(() => s.enum(["a", "a"])).toThrow(/repeat/);
     expect(() => s.object({})).toThrow(/at least one field/);
-    expect(() => s.object({ a: "string" as never })).toThrow(/field 'a' must be made with s/);
+    expect(() => s.object({ a: "string" as never })).toThrow(/field .a. must be made with SchemaBuilder/);
     expect(() => s.array(s.string().optional())).toThrow(/cannot be optional/);
     expect(() => s.string().optional().optional()).toThrow(/twice/);
   });

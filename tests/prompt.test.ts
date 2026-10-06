@@ -13,10 +13,12 @@ import {
   refTarget,
   rootRefs,
   showRef,
-  s,
+  SchemaBuilder,
   TreeGen,
   type Infer,
 } from "../src/index";
+
+const s = SchemaBuilder;
 
 const Review = s.object({
   ageRange: s.enum(["18-25", "25-50", "50+"]),

@@ -12,9 +12,11 @@ import {
   prompt,
   rootRefs,
   SubCategorySamplerGen,
-  s,
+  SchemaBuilder,
   TreeGen,
 } from "../src/index";
+
+const s = SchemaBuilder;
 
 const Review = s.object({
   ageRange: s.string(),

@@ -28,7 +28,9 @@ tutorials (see [Examples](#examples)). This is an independent project, not affil
 A person with three fields: `city` depends on `country`.
 
 ```ts
-import { CategorySamplerGen, NumberSamplerGen, preview, rootRefs, s, SubCategorySamplerGen, TreeGen } from "ts-synthdesigner";
+import { CategorySamplerGen, NumberSamplerGen, preview, rootRefs, SchemaBuilder, SubCategorySamplerGen, TreeGen } from "ts-synthdesigner";
+
+const s = SchemaBuilder; // short alias for the schema builder
 
 const Person = s.object({
   country: s.string(),

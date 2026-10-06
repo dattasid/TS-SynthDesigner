@@ -2,7 +2,9 @@ import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { CategorySamplerGen, ConfigError, create, CustomGen, GenerationError, NumberSamplerGen, preview, s, TreeGen } from "../src/index";
+import { CategorySamplerGen, ConfigError, create, CustomGen, GenerationError, NumberSamplerGen, preview, SchemaBuilder, TreeGen } from "../src/index";
+
+const s = SchemaBuilder;
 
 const Pet = s.object({ name: s.string(), age: s.integer() });
 const pet = new TreeGen({

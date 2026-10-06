@@ -13,9 +13,11 @@ import {
   previewSync,
   refs,
   rootRefs,
-  s,
+  SchemaBuilder,
   TreeGen,
 } from "../src/index";
+
+const s = SchemaBuilder;
 
 const Customer = s.object({ name: s.string(), secret: s.string().temp() }, { name: "customer" });
 const Zone = s.object({ label: s.string(), seed: s.integer().temp() });

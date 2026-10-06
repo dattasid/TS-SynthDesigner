@@ -12,10 +12,12 @@ import {
   previewSync,
   prompt,
   rootRefs,
-  s,
+  SchemaBuilder,
   TreeGen,
   type Infer,
 } from "../src/index";
+
+const s = SchemaBuilder;
 
 const Order = s.object({ price: s.number(), qty: s.integer(), total: s.number(), label: s.string() });
 

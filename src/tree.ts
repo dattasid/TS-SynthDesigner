@@ -16,7 +16,7 @@ export type AnyObjectSchema = ObjectSchema<any>;
 
 export interface TreeGenParams<S extends AnyObjectSchema> {
   id?: string;
-  /** The data model: `s.object({...})`. Its type is what `fields` must match, and what refs see. */
+  /** The data model: `SchemaBuilder.object({...})`. Its type is what `fields` must match, and what refs see. */
   schema: S;
   /** One Gen per schema key (optional keys may be left out). */
   fields: Fields<Infer<S>>;
@@ -55,7 +55,7 @@ export function checkBound(gen: AnyGen, where: string, fail: (message: string) =
  * Makes objects of a schema's type: one Gen per field. A TreeGen is itself a Gen, so it can be a field
  * of another tree (whose schema has the same schema object at that key).
  *
- *     const Person = s.object({ name: s.string(), age: s.integer() });
+ *     const Person = SchemaBuilder.object({ name: SchemaBuilder.string(), age: SchemaBuilder.integer() });
  *     type Person = Infer<typeof Person>;
  *     const personGen = new TreeGen({ schema: Person, fields: { name: nameGen, age: ageGen } });
  *
@@ -70,7 +70,7 @@ export class TreeGen<S extends AnyObjectSchema> extends BaseGen<Infer<S>> {
 
   constructor({ id, schema, fields }: TreeGenParams<S>) {
     super(id);
-    this.check(schema instanceof ObjectSchema, "schema must be an object schema, made with s.object({...}).");
+    this.check(schema instanceof ObjectSchema, "schema must be an object schema, made with SchemaBuilder.object({...}).");
     this.schema = schema;
     this.fields = fields;
     // Early errors: fields vs schema, unknown refs and cycles among this tree's own fields. The plan

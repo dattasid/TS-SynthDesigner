@@ -5,11 +5,13 @@ import {
   ConfigError,
   previewSync,
   refs,
-  s,
+  SchemaBuilder,
   SubCategorySamplerGen,
   TreeGen,
   type Infer,
 } from "../src/index";
+
+const s = SchemaBuilder;
 
 const Person = s.object({
   name: s.string(),

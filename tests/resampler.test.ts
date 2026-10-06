@@ -6,10 +6,12 @@ import {
   NumberSamplerGen,
   previewSync,
   rootRefs,
-  s,
+  SchemaBuilder,
   TreeGen,
   type BoundGen,
 } from "../src/index";
+
+const s = SchemaBuilder;
 
 const Job = s.object({ country: s.string(), occupation: s.string(), bonus: s.number().optional() });
 

@@ -72,7 +72,7 @@ export {
   NumberSchema,
   ObjectSchema,
   OptionalSchema,
-  s,
+  SchemaBuilder,
   Schema,
   StringSchema,
   TempSchema,

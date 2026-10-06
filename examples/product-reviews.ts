@@ -7,7 +7,9 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { FakerGen } from "../src/faker";
-import { CategorySamplerGen, create, LLMTextGen, NumberSamplerGen, prompt, Provider, refs, rootRefs, s, SubCategorySamplerGen, TreeGen, type Infer } from "../src/index";
+import { CategorySamplerGen, create, LLMTextGen, NumberSamplerGen, prompt, Provider, refs, rootRefs, SchemaBuilder, SubCategorySamplerGen, TreeGen, type Infer } from "../src/index";
+
+const s = SchemaBuilder;
 
 // The tutorial's model config: the LLM fields ask for "writer", and this says what it is.
 // temperature 1, top_p 0.95, max 2048 tokens, thinking off.

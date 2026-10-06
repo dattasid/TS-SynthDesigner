@@ -6,14 +6,14 @@ import { ConfigError } from "./errors";
  * the static type, the runtime check, the JSON Schema (for APIs) and the short shape + notes (for
  * prompts), so they never drift:
  *
- *     const backStory = s.object({
- *       childhood: s.string({ description: "two sentences about where they grew up" }),
- *       happiness: s.integer({ min: 1, max: 10 }),
- *       mood: s.enum(["calm", "anxious"]),
+ *     const backStory = SchemaBuilder.object({
+ *       childhood: SchemaBuilder.string({ description: "two sentences about where they grew up" }),
+ *       happiness: SchemaBuilder.integer({ min: 1, max: 10 }),
+ *       mood: SchemaBuilder.enum(["calm", "anxious"]),
  *     });
  *     type BackStory = Infer<typeof backStory>;
  *
- * Deliberately small: no unions, maps, refinements or transforms. `s.date()` and `.temp()` are for
+ * Deliberately small: no unions, maps, refinements or transforms. `SchemaBuilder.date()` and `.temp()` are for
  * data models only: an LLM reply schema may not contain them (`llmProblems()`).
  */
 export abstract class Schema<T> {
@@ -143,7 +143,7 @@ export class NumberSchema extends Schema<number> {
     super(description);
     checkBounds(integer ? "integer" : "number", min, max, integer);
     if (decimalPlaces !== undefined && !(Number.isInteger(decimalPlaces) && decimalPlaces >= 0 && decimalPlaces <= 15)) {
-      throw new ConfigError(`s.number: decimalPlaces must be an integer from 0 to 15, got ${decimalPlaces}.`);
+      throw new ConfigError(`SchemaBuilder.number: decimalPlaces must be an integer from 0 to 15, got ${decimalPlaces}.`);
     }
     this.min = min;
     this.max = max;
@@ -194,7 +194,7 @@ export class DateSchema extends Schema<Date> {
     return value instanceof Date && !Number.isNaN(value.getTime()) ? value : fail(issues, path, this.expected(), value);
   }
   override llmProblems(path = ""): string[] {
-    return [`${path || "reply"}: s.date() cannot be in an LLM reply (JSON has no dates); ask for s.string() and convert with a FunctionGen.`];
+    return [`${path || "reply"}: SchemaBuilder.date() cannot be in an LLM reply (JSON has no dates); ask for SchemaBuilder.string() and convert with a FunctionGen.`];
   }
   toJSONSchema(): Record<string, unknown> {
     throw new ConfigError(this.llmProblems()[0]!);
@@ -213,9 +213,9 @@ export class EnumSchema<V extends string> extends Schema<V> {
   constructor(values: readonly V[], { description }: DescribedParams) {
     super(description);
     if (!Array.isArray(values) || values.length === 0 || values.some((v) => typeof v !== "string")) {
-      throw new ConfigError(`s.enum: values must be a non-empty list of strings, got ${show(values)}.`);
+      throw new ConfigError(`SchemaBuilder.enum: values must be a non-empty list of strings, got ${show(values)}.`);
     }
-    if (new Set(values).size !== values.length) throw new ConfigError(`s.enum: values repeat: ${show(values)}.`);
+    if (new Set(values).size !== values.length) throw new ConfigError(`SchemaBuilder.enum: values repeat: ${show(values)}.`);
     this.values = [...values];
   }
 
@@ -245,11 +245,11 @@ export class ArraySchema<I extends Schema<unknown>> extends Schema<Infer<I>[]> {
 
   constructor(readonly items: I, { description, minItems, maxItems }: ArraySchemaParams) {
     super(description);
-    if (!(items instanceof Schema)) throw new ConfigError(`s.array: the item schema must be made with s.*, got ${show(items)}.`);
-    if (items instanceof OptionalSchema) throw new ConfigError(`s.array: items cannot be optional; use s.array(x).optional() for an optional list.`);
-    if (items instanceof TempSchema) throw new ConfigError(`s.array: items cannot be temp; use s.array(x).temp() for a temp list.`);
+    if (!(items instanceof Schema)) throw new ConfigError(`SchemaBuilder.array: the item schema must be made with SchemaBuilder.*, got ${show(items)}.`);
+    if (items instanceof OptionalSchema) throw new ConfigError(`SchemaBuilder.array: items cannot be optional; use SchemaBuilder.array(x).optional() for an optional list.`);
+    if (items instanceof TempSchema) throw new ConfigError(`SchemaBuilder.array: items cannot be temp; use SchemaBuilder.array(x).temp() for a temp list.`);
     checkBounds("array", minItems, maxItems, true);
-    if ((minItems ?? 0) < 0) throw new ConfigError(`s.array: minItems must be >= 0, got ${minItems}.`);
+    if ((minItems ?? 0) < 0) throw new ConfigError(`SchemaBuilder.array: minItems must be >= 0, got ${minItems}.`);
     this.minItems = minItems;
     this.maxItems = maxItems;
   }
@@ -404,15 +404,15 @@ export class ObjectSchema<F extends Fields> extends Schema<ObjectValue<F>> {
   constructor(fields: F, { description, name }: ObjectSchemaParams) {
     super(description);
     if (name !== undefined && (typeof name !== "string" || !/^[A-Za-z_$][\w$]*$/.test(name))) {
-      throw new ConfigError(`s.object: name must be an identifier like "person", got ${JSON.stringify(name)}.`);
+      throw new ConfigError(`SchemaBuilder.object: name must be an identifier like "person", got ${JSON.stringify(name)}.`);
     }
     this.name = name;
     if (typeof fields !== "object" || fields === null || Array.isArray(fields)) {
-      throw new ConfigError(`s.object: fields must be an object of schemas, got ${show(fields)}.`);
+      throw new ConfigError(`SchemaBuilder.object: fields must be an object of schemas, got ${show(fields)}.`);
     }
-    if (Object.keys(fields).length === 0) throw new ConfigError(`s.object: needs at least one field.`);
+    if (Object.keys(fields).length === 0) throw new ConfigError(`SchemaBuilder.object: needs at least one field.`);
     for (const [key, field] of Object.entries(fields)) {
-      if (!(field instanceof Schema)) throw new ConfigError(`s.object: field '${key}' must be made with s.*, got ${show(field)}.`);
+      if (!(field instanceof Schema)) throw new ConfigError(`SchemaBuilder.object: field '${key}' must be made with SchemaBuilder.*, got ${show(field)}.`);
     }
     this.fields = { ...fields };
   }
@@ -452,7 +452,7 @@ export class ObjectSchema<F extends Fields> extends Schema<ObjectValue<F>> {
   /**
    * A schema with only these fields, like TypeScript's `Pick`. The field schemas are the same objects,
    * so refs made from this schema fit trees of the smaller one. (To add fields, spread:
-   * `s.object({ ...Person.fields, email: s.string() })`.)
+   * `SchemaBuilder.object({ ...Person.fields, email: SchemaBuilder.string() })`.)
    */
   pick<const K extends keyof F & string>(...keys: K[]): ObjectSchema<Pick<F, K>> {
     for (const key of keys) {
@@ -511,8 +511,13 @@ export class ObjectSchema<F extends Fields> extends Schema<ObjectValue<F>> {
   }
 }
 
-/** The schema builder. See `Schema`. */
-export const s = {
+/**
+ * The schema builder. See `Schema`. Short to alias, as the examples do:
+ *
+ *     const s = SchemaBuilder;
+ *     const Person = s.object({ name: s.string(), age: s.integer({ min: 0 }) });
+ */
+export const SchemaBuilder = {
   string: (params: DescribedParams = {}) => new StringSchema(params.description),
   number: (params: DecimalSchemaParams = {}) => new NumberSchema(false, params),
   integer: (params: NumberSchemaParams = {}) => new NumberSchema(true, params),

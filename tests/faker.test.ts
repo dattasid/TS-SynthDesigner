@@ -1,7 +1,9 @@
 import { base, de, en } from "@faker-js/faker";
 import { describe, expect, it } from "vitest";
 import { FAKER_DEFAULT_REF_DATE, FakerGen } from "../src/faker";
-import { CategorySamplerGen, ConfigError, Context, NumberSamplerGen, previewSync, refs, s, TreeGen, type Infer } from "../src/index";
+import { CategorySamplerGen, ConfigError, Context, NumberSamplerGen, previewSync, refs, SchemaBuilder, TreeGen, type Infer } from "../src/index";
+
+const s = SchemaBuilder;
 
 const Customer = s.object({
   sex: s.enum(["male", "female"]),

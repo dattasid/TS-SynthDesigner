@@ -10,13 +10,15 @@ import {
   Provider,
   reasoningOf,
   rootRefs,
-  s,
+  SchemaBuilder,
   TreeGen,
   type CompletionRequest,
   type Infer,
   type LLMStructuredGenParams,
 } from "../src/index";
 import { liveSetup, skipLive } from "./live";
+
+const s = SchemaBuilder;
 
 const backStory = s.object({
   childhood: s.string({ description: "two sentences" }),

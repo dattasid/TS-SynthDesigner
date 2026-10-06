@@ -24,12 +24,14 @@ import {
   reasoningOf,
   refs,
   rootRefs,
-  s,
+  SchemaBuilder,
   showRef,
   SubCategorySamplerGen,
   TreeGen,
   type Infer,
 } from "../src/index";
+
+const s = SchemaBuilder;
 
 // The data model is a schema: one definition gives the type (Infer), the runtime check of every
 // record, and the refs. Plain strings: values can come from a hand-written list today and a data

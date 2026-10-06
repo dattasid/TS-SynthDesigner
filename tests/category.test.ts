@@ -5,11 +5,13 @@ import {
   GenerationError,
   previewSync,
   refs,
-  s,
+  SchemaBuilder,
   SubCategorySamplerGen,
   TreeGen,
   type Infer,
 } from "../src/index";
+
+const s = SchemaBuilder;
 
 describe("category samplers", () => {
   it("CategorySamplerGen picks values by weight", () => {

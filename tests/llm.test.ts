@@ -18,11 +18,13 @@ import {
   reasoningOf,
   refs,
   rootRefs,
-  s,
+  SchemaBuilder,
   traceOf,
   TreeGen,
 } from "../src/index";
 import { liveSetup, skipLive } from "./live";
+
+const s = SchemaBuilder;
 
 /** A fetch that records requests and answers from `reply` (status + JSON body). */
 function fakeFetch(reply: (n: number) => { status: number; body: unknown; headers?: Record<string, string> }, delayMs = 0) {

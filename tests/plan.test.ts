@@ -13,13 +13,15 @@ import {
   previewSync,
   refs,
   rootRefs,
-  s,
+  SchemaBuilder,
   showRef,
   TreeGen,
   type BoundGen,
   type Infer,
   type RefTree,
 } from "../src/index";
+
+const s = SchemaBuilder;
 
 /** Test Gen: returns "<path>#<call>" and logs each call's path and inputs, so the run order is visible. */
 class ProbeGen<Inputs = {}> extends BaseGen<string, Inputs> {

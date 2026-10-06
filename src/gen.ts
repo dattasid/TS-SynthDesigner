@@ -107,7 +107,7 @@ function makeRef(scope: RefScope, path: readonly string[], schema: ObjectSchema<
 /**
  * Whether a ref made from `target.schema` may read `object`, a tree's schema: its first key must be
  * the very same field schema there. The same schema, or one extended by spreading it
- * (`s.object({ ...Customer.fields, email: s.string() })`), passes; another object does not.
+ * (`SchemaBuilder.object({ ...Customer.fields, email: SchemaBuilder.string() })`), passes; another object does not.
  */
 export function refFits(target: RefTarget, object: ObjectSchema<any>): boolean {
   if (target.schema === object) return true;
@@ -117,7 +117,7 @@ export function refFits(target: RefTarget, object: ObjectSchema<any>): boolean {
 
 function checkSchema(fn: string, schema: unknown): void {
   if (!(schema instanceof ObjectSchema)) {
-    throw new ConfigError(`${fn}() takes the object schema of the tree it reads, e.g. ${fn}(Person) with const Person = s.object({...}).`);
+    throw new ConfigError(`${fn}() takes the object schema of the tree it reads, e.g. ${fn}(Person) with const Person = SchemaBuilder.object({...}).`);
   }
 }
 

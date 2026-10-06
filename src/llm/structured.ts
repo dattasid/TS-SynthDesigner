@@ -23,7 +23,7 @@ export interface LLMStructuredGenParams<T> {
   /** Usually made with the `prompt` tag, whose refs become the fields this Gen reads. */
   prompt: Prompt | string;
   systemPrompt?: Prompt | string;
-  /** The reply's shape, made with `s.object(...)`. The field's type is the schema's type. */
+  /** The reply's shape, made with `SchemaBuilder.object(...)`. The field's type is the schema's type. */
   schema: Schema<T>;
   /** Default `shortSchemaAndNotes`. Generated from the schema, so it never drifts from what is validated. */
   schemaInPrompt?: SchemaInPrompt;
@@ -43,9 +43,9 @@ export interface LLMStructuredGenParams<T> {
 /**
  * A JSON object from an LLM, checked against a schema and typed by it:
  *
- *     const backStory = s.object({
- *       childhood: s.string({ description: "two sentences" }),
- *       happiness: s.integer({ min: 1, max: 10 }),
+ *     const backStory = SchemaBuilder.object({
+ *       childhood: SchemaBuilder.string({ description: "two sentences" }),
+ *       happiness: SchemaBuilder.integer({ min: 1, max: 10 }),
  *     });
  *     ...
  *     backStory: new LLMStructuredGen({
@@ -92,7 +92,7 @@ class LLMStructuredCall<T> extends BaseGen<T, Record<string, unknown>> {
     super(id);
     this.check(typeof model === "string" && model !== "", "model must be a model nickname, e.g. \"fast\".");
     this.check(typeof prompt === "string" || prompt instanceof Prompt, "prompt must be a string or made with the prompt`...` tag.");
-    this.check(schema instanceof ObjectSchema, "schema must be an object schema, made with s.object({...}).");
+    this.check(schema instanceof ObjectSchema, "schema must be an object schema, made with SchemaBuilder.object({...}).");
     const problems = schema.llmProblems();
     this.check(problems.length === 0, `schema cannot describe an LLM reply: ${problems.join(" ")}`);
     this.check(GUIDANCE.includes(schemaInPrompt), `schemaInPrompt must be one of ${GUIDANCE.map((g) => `"${g}"`).join(", ")}; got ${JSON.stringify(schemaInPrompt)}.`);
