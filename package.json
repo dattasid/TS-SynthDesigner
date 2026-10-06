@@ -1,5 +1,5 @@
 {
-  "name": "ts-datadesigner",
+  "name": "ts-synthdesigner",
   "version": "0.1.0",
   "private": true,
   "description": "Typed synthetic data generation for TypeScript, modeled on NVIDIA NeMo DataDesigner.",

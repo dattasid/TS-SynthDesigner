@@ -213,7 +213,7 @@ const Customer = s.object({ sex: s.enum(["male", "female"]), firstName: s.string
 type Customer = Infer<typeof Customer>;
 
 it("names, emails, addresses: faker-js", async () => {
-  // FakerGen has its own entry point ("ts-datadesigner/faker"), so faker loads only when used.
+  // FakerGen has its own entry point ("ts-synthdesigner/faker"), so faker loads only when used.
   // faker draws from the field's stream: the same seed gives the same people.
   const c = refs(Customer);
   const customer = new TreeGen({

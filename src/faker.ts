@@ -1,4 +1,4 @@
-// FakerGen lives in its own entry point, "ts-datadesigner/faker", so that faker-js (a large, optional
+// FakerGen lives in its own entry point, "ts-synthdesigner/faker", so that faker-js (a large, optional
 // peer dependency) is only loaded by projects that use it.
 import { base, en, Faker, type LocaleDefinition, type Randomizer } from "@faker-js/faker";
 import type { Context } from "./context";
@@ -43,7 +43,7 @@ export interface FakerGenBoundParams<R extends Record<string, Ref<unknown>>, Out
  * Names, addresses, emails, dates, ... from faker-js (https://fakerjs.dev). The counterpart of
  * DataDesigner's Faker-based person sampler, one value per field:
  *
- *     import { FakerGen } from "ts-datadesigner/faker";
+ *     import { FakerGen } from "ts-synthdesigner/faker";
  *
  *     lastName: new FakerGen({ fn: (f) => f.person.lastName() }),
  *     firstName: FakerGen.bound({ inputs: { sex: c.sex }, fn: (f, { sex }) => f.person.firstName(sex) }),
