@@ -1,14 +1,22 @@
 // DataDesigner's second tutorial, "Structured Outputs, Jinja Expressions, and Conditional Generation"
 // (docs/notebook_source/2-structured-outputs-and-jinja-expressions.py). Same columns, values and
-// prompts; run it with examples/structured-reviews.run.ts.
+// prompts. Runs on OpenRouter into scratch/structured-reviews.jsonl:
+//   npx tsx examples/structured-reviews.ts [numRecords]
+// Needs an OpenRouter key in the env var OPENROUTER_API_KEY or in a file of that name.
+// Imported (by the tests), it only defines the generator.
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import {
   CategorySamplerGen,
+  create,
   FunctionGen,
   LLMStructuredGen,
   LLMTextGen,
   match,
   MatchGen,
   prompt,
+  Provider,
   rootRefs,
   s,
   SubCategorySamplerGen,
@@ -17,6 +25,22 @@ import {
   type Output,
 } from "../src/index";
 import { Customer, customerGen } from "./product-reviews";
+
+// The tutorial's model config: the LLM fields ask for "writer", and this says what it is.
+// temperature 1, top_p 0.95, max 2048 tokens, thinking off.
+const providers = {
+  openrouter: Provider.openRouter({ apiKey: existsSync("OPENROUTER_API_KEY") ? { file: "OPENROUTER_API_KEY" } : { env: "OPENROUTER_API_KEY" } }),
+};
+const models = {
+  writer: {
+    provider: "openrouter",
+    model: "qwen/qwen3.8-flash",
+    temperature: 1,
+    topP: 0.95,
+    maxTokens: 2048,
+    extra: { reasoning: { enabled: false } },
+  },
+};
 
 // The tutorial's Pydantic models, as LLM reply schemas.
 export const Product = s.object({
@@ -54,7 +78,7 @@ export type StructuredReviewRecord = Output<typeof StructuredReview>;
 
 const r = rootRefs(StructuredReview);
 
-/** Its LLM fields use the model nickname "writer"; the run script maps it to a model. */
+/** Its LLM fields use the model nickname "writer"; `models` above (or a test's mock) says what it is. */
 export const structuredReviewGen = new TreeGen({
   id: "structuredReview",
   schema: StructuredReview,
@@ -165,3 +189,11 @@ ${match({
     }),
   },
 });
+
+// Run only when executed directly, not when imported.
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  const numRecords = Number(process.argv[2] ?? 10);
+  const path = "scratch/structured-reviews.jsonl";
+  const { seed } = await create({ gen: structuredReviewGen, numRecords, path, overwrite: true, seed: 2026, providers, models });
+  console.log(`${numRecords} records in ${path} (seed ${seed.join(",")})`);
+}

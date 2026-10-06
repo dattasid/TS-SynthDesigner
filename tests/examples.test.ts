@@ -229,7 +229,7 @@ it("names, emails, addresses: faker-js", async () => {
 });
 
 it("DataDesigner's tutorial: product reviews (examples/product-reviews.ts)", async () => {
-  // The whole tutorial, ported field for field. examples/product-reviews.run.ts runs it on a real model.
+  // The whole tutorial, ported field for field. run examples/product-reviews.ts directly for a real model.
   const { records } = await preview({
     gen: productReviewGen,
     numRecords: 2,

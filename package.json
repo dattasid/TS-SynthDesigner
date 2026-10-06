@@ -22,9 +22,10 @@
     }
   },
   "devDependencies": {
+    "@faker-js/faker": "^9.9.0",
     "@types/node": "^22.20.4",
+    "tsx": "^4.23.15",
     "typescript": "^5.9.3",
-    "vitest": "^2.1.9",
-    "@faker-js/faker": "^9.9.0"
+    "vitest": "^2.1.9"
   }
 }
