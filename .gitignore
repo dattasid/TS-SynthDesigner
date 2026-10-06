@@ -4,3 +4,9 @@ coverage/
 scratch/
 OPENROUTER_API_KEY
 *_API_KEY
+
+# Internal notes and AI-agent files
+AGENT.md
+Design.md
+CLAUDE.md
+.claude/
