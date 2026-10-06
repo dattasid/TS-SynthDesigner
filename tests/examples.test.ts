@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, expectTypeOf, it } from "vitest";
 import { productReviewGen } from "../examples/product-reviews";
+import { structuredReviewGen } from "../examples/structured-reviews";
 import { FakerGen } from "../src/faker";
 import {
   CategorySamplerGen,
@@ -240,6 +241,45 @@ it("DataDesigner's tutorial: product reviews (examples/product-reviews.ts)", asy
   expect(first!.customerReview).toContain(`named ${first!.customer.firstName} from ${first!.customer.city}`);
   expect(first!.customerReview).toContain(first!.productName); // reads the other LLM field
   console.log(records);
+});
+
+it("DataDesigner's tutorial 2: structured replies, expressions, skipped fields (examples/structured-reviews.ts)", async () => {
+  // A mock that answers like a model: JSON for the structured fields, alternating low and high ratings.
+  let reviews = 0;
+  const mock = new MockProvider({
+    respond: ({ prompt }) =>
+      prompt.startsWith("Create a product")
+        ? `{"name": "Desk Lamp", "description": "A lamp.", "price": 24.999}`
+        : prompt.startsWith("Your task is to write a review")
+          ? JSON.stringify({ rating: reviews++ % 2 === 0 ? 1 : 5, customerMood: "neutral", review: "It is a lamp." })
+          : `echo: ${prompt}`,
+  });
+  const { records } = await preview({
+    gen: structuredReviewGen,
+    numRecords: 8,
+    seed: 1,
+    providers: { mock },
+    models: { writer: { provider: "mock", model: "echo" } },
+  });
+  for (const x of records) {
+    expect("customer" in x).toBe(false); // a .temp() field: read by customerName, then dropped
+    expect(x.product.price).toBe(25); // rounded to 2 decimals
+    if (x.targetAgeRange === "18-25") expect(x.reviewStyle).toBe("rambling");
+    if (x.customerReview.rating <= 2) {
+      expect(x.complaintAnalysis).toContain("Rating: 1/5");
+      expect(x.actionItems).toContain(x.complaintAnalysis);
+      expect(x.reviewSummary).toContain(`Complaint analysis: ${x.complaintAnalysis}`);
+    } else {
+      expect(x.complaintAnalysis).toBeUndefined();
+      expect(x.actionItems).toBeUndefined();
+      expect(x.reviewSummary).not.toContain("Complaint analysis");
+    }
+  }
+  const reviewPrompts = mock.requests.filter((q) => q.prompt.startsWith("Your task is to write a review"));
+  expect(reviewPrompts.some((q) => q.prompt.includes("more formal and structured"))).toBe(true);
+  // 8 products, 8 reviews, 8 summaries, and 2 more calls per low rating.
+  expect(mock.requests).toHaveLength(24 + 2 * records.filter((x) => x.customerReview.rating <= 2).length);
+  console.log(records[0]);
 });
 
 it("conditional fields: MatchGen (DataDesigner's conditional params and skipped columns)", async () => {
