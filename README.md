@@ -2,18 +2,16 @@
 
 **Synthetic data generation for TypeScript: schema-first trees, DAG dependency tracking, typed LLM calls.**
 
-You describe the data once, as a schema. Every field gets a generator: a sampler, a Faker call, a
-function or an LLM. Fields read each other, and the library works out the order. The TypeScript
-compiler checks the wiring: a misspelled field, a generator of the wrong type or a missing input is
-a red squiggle in your editor, not a failed run an hour into a batch of LLM calls.
+A typed, schema-based synthetic data generator where every row is a fully qualified object, with optional sub-objects of its own. Compile time type checks make it easier to quickly catch typos, silly mistakes and get better IDE autocomplete suggestions. This is backed up by full runtime validation.
+
+Each field can generate data based on other fields already assigned. The fields are generated in correct order at runtime, including waiting for LLM calls.
 
 Inspired by [NVIDIA NeMo Data Designer](https://github.com/NVIDIA-NeMo/DataDesigner), and ports two of its
 tutorials (see [Examples](#examples)). This is an independent project, not affiliated with NVIDIA.
 
 ## Highlights
 
-- **Compile-time checks.** Refs to fields are typed property access (`p.country`), so typos,
-  type mismatches, unbound inputs and missing fields fail to compile.
+- **Compile-time checks.** Type checking ensures you have hooked up the correct generators, dependencies are guaranteed correct even when tracking an object tree, eg: `person.friend.address`, callbacks know their argument types, LLMs return known types.
 - **Typed, validated LLM replies.** One schema gives the TypeScript type, the shape the model is
   told to reply in, and the check of each reply. An invalid reply is retried, with the model shown
   exactly what was wrong.
@@ -110,10 +108,14 @@ every record is validated against its schema, and the error names the record and
 const Review = s.object({
   rating: s.integer({ min: 1, max: 5 }),
   mood: s.enum(["happy", "neutral", "mad"]),
-  price: s.number({ min: 10, max: 1000, decimalPlaces: 2, description: "price paid, in USD" }),
   text: s.string({ description: "the review, nothing else" }),
 });
-const Order = s.object({ product: s.string(), customer: s.string(), review: Review });
+const Order = s.object({
+  product: s.string(),
+  customer: s.string(),
+  ageGroup: s.enum(["teen", "adult", "senior"]),
+  review: Review,
+});
 const o = rootRefs(Order);
 
 const order = new TreeGen({
@@ -121,10 +123,20 @@ const order = new TreeGen({
   fields: {
     product: new CategorySamplerGen({ values: ["desk lamp", "kettle"] }),
     customer: new CategorySamplerGen({ values: ["Ada", "Linus"] }),
+    ageGroup: new CategorySamplerGen<"teen" | "adult" | "senior">({ values: ["teen", "adult", "senior"] }),
     review: new LLMStructuredGen({
-      model: "writer",
+      model: "review-writer-model",
       schema: Review,
-      prompt: prompt`Write a review of a ${o.product} bought by ${o.customer}.`,
+      // The refs in the prompt are the fields it reads: no separate list of inputs to keep in sync.
+      prompt: prompt`Write a review of a ${o.product} bought by ${o.customer}.`
+        .match({ // conditional text, picked by the row's values
+          inputs: { age: o.ageGroup },
+          cases: [
+            { when: ({ age }) => age === "teen", then: " Write it like a text message." },
+            { when: ({ age }) => age === "senior", then: prompt` Say whether ${o.customer} found it easy to set up.` },
+          ],
+          otherwise: " Keep it to two sentences.",
+        }),
       maxAttempts: 3,
     }),
   },
@@ -135,29 +147,46 @@ const { records } = await preview({
   numRecords: 10,
   seed: 1,
   providers: { openrouter: Provider.openRouter() }, // key from OPENROUTER_API_KEY
-  models: { writer: { provider: "openrouter", model: "qwen/qwen3.8-flash", temperature: 1 } },
+  models: { "review-writer-model": { provider: "openrouter", model: "qwen/qwen3.8-flash", temperature: 1 } },
 });
 records[0].review.mood; // typed: "happy" | "neutral" | "mad"
 ```
+
+The prompts sent for four rows:
+
+```text
+Write a review of a desk lamp bought by Linus. Say whether Linus found it easy to set up.
+Write a review of a desk lamp bought by Ada. Say whether Ada found it easy to set up.
+Write a review of a kettle bought by Linus. Write it like a text message.
+...
+```
+
+Prompts are checked too:
+- `when` gets typed inputs: `age === "teenager"` is a compile error, since it can never match.
+- `${o.review}` is a compile error: an object has no obvious text form. `json(o.review)` writes it
+  as indented JSON.
+- Jinja-style `{{ name }}` is reported as an error instead of reaching the model as literal text.
 
 The model is told the shape and the rules, generated from the schema, so they cannot drift from
 what is validated. When a reply breaks them, the retry shows the model its reply and the problems:
 
 ```text
-Review a kettle.
+Write a review of a desk lamp bought by Linus. Say whether Linus found it easy to set up.
 
 Reply with only a JSON object of this shape (plain JSON, no comments, no other text):
 {
   "rating": integer,
-  "mood": "happy" | "neutral" | "mad"
+  "mood": "happy" | "neutral" | "mad",
+  "text": string
 }
 
 Fields:
 - rating: an integer from 1 to 5
 - mood: one of "happy", "neutral", "mad"
+- text: the review, nothing else
 
 Your previous reply was:
-{"rating": 7, "mood": "ecstatic"}
+{"rating": 7, "mood": "ecstatic", "text": "Bright, sturdy and easy to set up."}
 
 It had these problems:
 - rating: expected an integer from 1 to 5, got 7
@@ -171,6 +200,8 @@ Also:
 - `apiGuidedDecoding: true` asks the API to enforce the JSON Schema; replies are still validated.
 - `onFailure: "default"` uses a fallback value instead of failing the run.
 - `reasoningOf(o.review)` puts a reasoning model's thinking in a field of its own.
+- `MatchGen` makes a whole field conditional: rows that match no case get no value, and make no
+  LLM call.
 
 Providers: OpenAI-format endpoints (OpenAI, OpenRouter, NVIDIA, Ollama, vLLM) and Anthropic, with
 retries and a concurrency limit. `MockProvider` answers without a network, for tests and demos.
@@ -206,44 +237,65 @@ Also: `FunctionGen` for `field2 = f(field1)`, `ConstantGen` for a value shared b
 `FakerGen` for names, emails and addresses (faker-js, optional), and `.temp()` fields that other
 fields can read but that are dropped from the output (the output type drops them too).
 
-## Prompt building
+## Effortless deep references
 
-A prompt is a tagged template. The refs in it are the fields it reads, so there is no separate
-list of inputs to keep in sync:
-
-```ts
-const replyPrompt = prompt`Write a support reply about ${t.product}. Order details:
-${json(t.details)}
-`
-  .match({
-    inputs: { stars: t.stars, age: t.ageRange },
-    cases: [
-      { when: ({ stars }) => stars <= 2, then: prompt`Apologise; the customer gave ${t.stars} stars.` },
-      { when: ({ age }) => age === "18-25", then: "Keep it casual." },
-    ],
-    otherwise: "Keep it formal.",
-  })
-  .append(" Reply with only the message.");
-```
-
-- `match` picks a section by the row's values. `when` gets typed inputs: comparing `ageRange` to
-  `"18-24"`, which is not one of its values, is a compile error.
-- A ref to an object has no obvious text form, so `${t.details}` is a compile error; `json(t.details)`
-  writes it as indented JSON.
-- Jinja-style `{{ name }}` is reported as an error instead of reaching the model as literal text.
-
-Whole fields can be conditional too. With `MatchGen`, a row that matches no case gets no value, and
-the LLM is only called for the rows that need it:
+Let us create an `Address` schema which can be subtree of a `Person` schema.
 
 ```ts
-complaint: new MatchGen({
-  inputs: { stars: t.stars },
-  cases: [{
-    when: ({ stars }) => stars <= 2,
-    then: new LLMTextGen({ model: "writer", prompt: prompt`Why only ${t.stars} stars for ${t.product}?` }),
-  }],
-}), // complaint must be optional in the schema: s.string().optional()
+const Address = s.object({ country: s.string(), city: s.string() });
+const a = refs(Address); // refs relative to the address
+
+const addressGen = new TreeGen({
+  schema: Address,
+  fields: {
+    country: new CategorySamplerGen({ values: ["Canada", "Japan"] }),
+    city: new SubCategorySamplerGen({
+      values: { Canada: ["Toronto", "Vancouver", "Montreal"], Japan: ["Tokyo", "Osaka", "Kyoto"] },
+    }).bind({ category: a.country }),
+  },
+});
 ```
+
+Now let us create a `Job` schema, but remember that person must work in their home country.
+
+```ts
+const Job = s.object({ title: s.string(), city: s.string(), commute: s.string() });
+const Person = s.object({ home: Address, job: Job });
+const p = rootRefs(Person);
+
+const personGen = new TreeGen({
+  schema: Person,
+  fields: {
+    home: addressGen, // the first tree, reused as is
+    job: new TreeGen({
+      schema: Job,
+      fields: {
+        title: new CategorySamplerGen({ values: ["nurse", "engineer", "chef"] }),
+        city: new SubCategorySamplerGen({
+          values: { Canada: ["Toronto", "Vancouver", "Montreal"], Japan: ["Tokyo", "Osaka", "Kyoto"] },
+        }).bind({ category: p.home.country }), // Refer to a deep property of the person, with compile time type checks
+        commute: CustomGen.bound({
+          inputs: { home: p.home.city, work: p.job.city }, // Work with deep properties
+          fn: ({ home, work }) => (home === work ? "local" : `${home} to ${work}`),
+        }),
+      },
+    }),
+  },
+});
+
+const { records } = await preview({ gen: personGen, numRecords: 4, seed: 4 });
+```
+
+```text
+{ home: { country: "Canada", city: "Montreal" },  job: { title: "engineer", city: "Montreal", commute: "local" } }
+{ home: { country: "Japan",  city: "Tokyo" },     job: { title: "nurse",    city: "Osaka",    commute: "Tokyo to Osaka" } }
+{ home: { country: "Japan",  city: "Osaka" },     job: { title: "nurse",    city: "Kyoto",    commute: "Osaka to Kyoto" } }
+{ home: { country: "Canada", city: "Vancouver" }, job: { title: "nurse",    city: "Montreal", commute: "Vancouver to Montreal" } }
+```
+
+The order comes from the reads: `home` first, then `job.city`, then `job.commute`. `p.home.cty`
+is a compile error, and so is a `home` generator that does not make an `Address`. Reusing a tree
+that reads with `rootRefs` (absolute) where it does not fit is caught before the run starts.
 
 ## Examples
 
@@ -281,8 +333,9 @@ npm test        # tsc, then vitest
 
 ## Status
 
-Working: everything above. Next: per-value seeding (so single rows can be regenerated), and lists of
-generated objects (`s.array(Item)` with a generator per element), which Data Designer does not have.
+1. Consolidated builder, more convenient, less type checks.
+2. Granular random seeds.
+3. Array fields backed by any type of generator.
 
 ## License
 
