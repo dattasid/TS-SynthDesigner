@@ -14,6 +14,7 @@ import {
   ConditionalRejectionResamplerGen,
   create,
   CustomGen,
+  FunctionGen,
   json,
   LLMStructuredGen,
   LLMTextGen,
@@ -70,20 +71,30 @@ export const Report = s.object({
   stepsToReproduce: s.array(s.string(), { description: "the steps, as the reporter gives them; may be few or vague" }),
   expected: s.string(),
   actual: s.string(),
+  reproCode: s.string({ description: "a minimal code snippet that reproduces the bug, only when asked for" }).optional(),
 }, { name: "report" });
 
+// The priority is decided before the triage call (see IssueSpecTemp); the LLM explains it.
 export const Triage = s.object({
   component: s.enum(["frontend", "backend", "payments", "identity", "mobile", "infrastructure"]),
-  priority: s.enum(["P0", "P1", "P2", "P3"]),
   duplicateLikely: s.boolean({ description: "whether this sounds like a commonly reported bug" }),
-  rationale: s.string({ description: "one or two sentences" }),
+  rationale: s.string({ description: "one or two sentences on the component and the given priority" }),
 }, { name: "triage" });
+
+// Pre-decide a few things, dont let LLM decide
+export const IssueSpecTemp = s.object({
+  priority: s.enum(["P0", "P1", "P2", "P3"]), // weighted
+  detail: s.enum(["detailed", "detailedWReproCode", "vague"]), // only power users have repro code
+}, { name: "issueSpec" });
+export type IssueSpec = Infer<typeof IssueSpecTemp>;
 
 export const BugReport = s.object({
   area: s.enum(["checkout", "search", "auth", "notifications"]),
   severity: s.enum(["low", "medium", "high", "critical"]),
   environment: Environment,
   reporter: Reporter.temp(),
+  issueSpec: IssueSpecTemp.temp(), // shapes the prompts, then dropped
+  priority: s.enum(["P0", "P1", "P2", "P3"]), // issueSpec's, kept in the record
   report: Report,
   triage: Triage,
   triageReasoning: s.string().optional(), // only reasoning models send it
@@ -91,7 +102,7 @@ export const BugReport = s.object({
   ticketText: s.string(),
 }, { name: "bug" });
 export type BugReport = Infer<typeof BugReport>;
-/** A record as written: no reporter. */
+/** A record as written: no reporter, no issueSpec. */
 export type BugReportRecord = Output<typeof BugReport>;
 
 const e = refs(Environment); // relative: the environment's own fields
@@ -142,41 +153,62 @@ export const bugReportGen = new TreeGen({
     severity: new CategorySamplerGen<BugReport["severity"]>({ values: ["low", "medium", "high", "critical"], skew: "zipf" }),
     environment: environmentGen,
     reporter: reporterGen,
+    issueSpec: new TreeGen({
+      schema: IssueSpecTemp,
+      fields: {
+        priority: new CategorySamplerGen<IssueSpec["priority"]>({ values: { P0: 1, P1: 2, P2: 4, P3: 3 } }),
+        // Keyed by the reporter's skill: novices never send repro code.
+        detail: new SubCategorySamplerGen<Reporter["techSavvy"], IssueSpec["detail"]>({
+          values: {
+            novice: { vague: 3, detailed: 1, detailedWReproCode: 0 },
+            "power user": { vague: 1, detailed: 2, detailedWReproCode: 2 },
+          },
+        }).bind({ category: r.reporter.techSavvy }),
+      },
+    }),
+    priority: FunctionGen.bound({ inputs: { priority: r.issueSpec.priority }, fn: ({ priority }) => priority }),
 
     report: new LLMStructuredGen({
       model: "writer",
       schema: Report,
-      prompt: prompt`You are ${r.reporter.name}, filing a bug report about the ${r.area} feature of a shopping app. The bug's severity is ${r.severity}. Your setup:
+      prompt: prompt`You are ${r.reporter.name}, filing a bug report about the ${r.area} feature of a shopping app. Your tech skills: ${r.reporter.techSavvy}. The bug's severity is ${r.severity}. Your setup:
 ${json(r.environment)}
 
 `.match({
-        inputs: { savvy: r.reporter.techSavvy },
-        cases: [{
-          when: ({ savvy }) => savvy === "novice",
-          then: "You are not technical: write vaguely and emotionally, skip steps, and do not mention versions.",
-        }],
-        otherwise: "You are a power user: write precise, numbered steps, and mention your OS, browser and app version.",
+        inputs: { detail: r.issueSpec.detail },
+        cases: [
+          {
+            when: ({ detail }) => detail === "vague",
+            then: "Write vaguely and emotionally: skip steps, and do not mention versions. Leave reproCode null.",
+          },
+          {
+            when: ({ detail }) => detail === "detailed",
+            then: "Write precise, numbered steps, and mention your OS, browser and app version. Leave reproCode null.",
+          },
+        ],
+        // detailedWReproCode
+        otherwise: "Write precise, numbered steps, mention your OS, browser and app version, and put a minimal code snippet that reproduces the bug (e.g. a curl call or a few lines of JavaScript) in reproCode.",
       }),
     }),
 
-    // A typed reply feeding another typed call.
+    // A typed reply feeding another typed call. The priority is given, not chosen.
     triage: new LLMStructuredGen({
       model: "writer",
       schema: Triage,
-      prompt: prompt`You triage bugs for a shopping app. Reported severity: ${r.severity}. Area: ${r.area}.
+      prompt: prompt`You triage bugs for a shopping app. Reported severity: ${r.severity}. Area: ${r.area}. The priority has been set to ${r.priority} (P0: drop everything, P3: someday).
 Environment:
 ${json(r.environment)}
 
 Report:
 ${json(r.report)}
 
-Pick the component and the priority (P0: drop everything, P3: someday), and say whether it is likely a duplicate.`,
+Pick the component, say whether it is likely a duplicate, and explain the component and the priority in the rationale.`,
     }),
     triageReasoning: reasoningOf(r.triage),
 
     // No otherwise: most rows get no note and make no call.
     incidentNote: new MatchGen({
-      inputs: { severity: r.severity, priority: r.triage.priority },
+      inputs: { severity: r.severity, priority: r.priority },
       cases: [{
         when: ({ severity, priority }) => severity === "critical" || priority === "P0",
         then: new LLMTextGen({
@@ -189,7 +221,8 @@ ${json(r.report)}`,
 
     ticketText: new LLMTextGen({
       model: "writer",
-      prompt: prompt`Render this bug as a ticket in Markdown: title, priority, component, environment, steps, expected and actual.
+      prompt: prompt`Render this bug as a ticket in Markdown: title, priority, component, environment, steps, expected and actual, and the repro code if there is any.
+Priority: ${r.priority}
 Report:
 ${json(r.report)}
 Triage:

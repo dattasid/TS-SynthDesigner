@@ -285,36 +285,46 @@ it("DataDesigner's tutorial 2: structured replies, expressions, skipped fields (
   console.log(records[0]);
 });
 
-it("bug-report triage: a typed LLM reply feeding another, an incident note for the worst (examples/bug-report-triage.ts)", async () => {
-  let triages = 0;
+it("bug-report triage: pre-decided specs, a typed LLM reply feeding another, an incident note for the worst (examples/bug-report-triage.ts)", async () => {
   const mock = new MockProvider({
     respond: ({ prompt }) =>
       prompt.startsWith("You are ")
-        ? JSON.stringify({ title: "Cart empties", stepsToReproduce: ["Add an item", "Pay"], expected: "Paid", actual: "Cart is empty" })
+        ? JSON.stringify({
+            title: "Cart empties",
+            stepsToReproduce: ["Add an item", "Pay"],
+            expected: "Paid",
+            actual: "Cart is empty",
+            reproCode: prompt.includes("in reproCode.") ? "await cart.pay()" : null,
+          })
         : prompt.startsWith("You triage bugs")
-          ? JSON.stringify({ component: "payments", priority: triages++ % 3 === 0 ? "P0" : "P2", duplicateLikely: false, rationale: "Blocks checkout." })
+          ? JSON.stringify({ component: "payments", duplicateLikely: false, rationale: "Blocks checkout." })
           : `echo: ${prompt}`,
   });
   const { records } = await preview({
     gen: bugReportGen,
-    numRecords: 12,
+    numRecords: 30,
     seed: 1,
     providers: { mock },
     models: { writer: { provider: "mock", model: "echo" } },
   });
   for (const b of records) {
-    expect("reporter" in b).toBe(false); // .temp(): shapes the prompt, then dropped
+    expect("reporter" in b || "issueSpec" in b).toBe(false); // .temp(): shape the prompts, then dropped
     const { platform, os, browser } = b.environment;
     if (platform !== "web") expect(browser).toBe("native app");
     else expect(browser === "native app" || (browser === "Safari" && os !== "macOS")).toBe(false);
     expect(b.environment.appVersion).toMatch(/^4\.\d+\.\d$/);
-    const worst = b.severity === "critical" || b.triage.priority === "P0";
+    const worst = b.severity === "critical" || b.priority === "P0"; // the priority was decided, not the LLM
     expect(b.incidentNote !== undefined).toBe(worst);
     expect(b.ticketText.includes('"Incident" section')).toBe(worst);
+    expect(b.ticketText).toContain(`Priority: ${b.priority}`);
   }
   const reportPrompts = mock.requests.filter((q) => q.prompt.startsWith("You are "));
-  expect(reportPrompts.some((q) => q.prompt.includes("numbered steps"))).toBe(true);
-  expect(reportPrompts.some((q) => q.prompt.includes("not technical"))).toBe(true);
+  for (const detail of ["Write vaguely", "Leave reproCode null", "in reproCode."]) {
+    expect(reportPrompts.some((q) => q.prompt.includes(detail))).toBe(true);
+  }
+  // Only power users are asked for repro code.
+  expect(reportPrompts.some((q) => q.prompt.includes("skills: novice") && q.prompt.includes("in reproCode."))).toBe(false);
+  expect(records.some((b) => b.report.reproCode !== undefined)).toBe(true);
 });
 
 it("conditional fields: MatchGen (DataDesigner's conditional params and skipped columns)", async () => {
