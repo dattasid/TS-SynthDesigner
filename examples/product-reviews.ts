@@ -6,7 +6,7 @@ import { CategorySamplerGen, LLMTextGen, NumberSamplerGen, prompt, refs, rootRef
 // DataDesigner's person sampler gives a fixed set of columns; here the customer is a type of our
 // own, with only the fields we want.
 export const Customer = s.object({
-  sex: s.enum(["male", "female"]),
+  gender: s.enum(["male", "female"]),
   firstName: s.string(),
   lastName: s.string(),
   age: s.integer({ min: 18, max: 70 }),
@@ -33,8 +33,8 @@ const c = refs(Customer);
 export const customerGen = new TreeGen({
   schema: Customer,
   fields: {
-    sex: new CategorySamplerGen<Customer["sex"]>({ values: ["male", "female"] }),
-    firstName: FakerGen.bound({ inputs: { sex: c.sex }, fn: (f, { sex }) => f.person.firstName(sex) }),
+    gender: new CategorySamplerGen<Customer["gender"]>({ values: ["male", "female"] }),
+    firstName: FakerGen.bound({ inputs: { sex: c.gender }, fn: (f, { sex }) => f.person.firstName(sex) }),
     lastName: new FakerGen({ fn: (f) => f.person.lastName() }),
     age: new NumberSamplerGen({ type: "uniform", low: 18, high: 70, integer: true }),
     // As in DataDesigner's Faker person, city and state are drawn independently: "Austin, Maine" happens.
