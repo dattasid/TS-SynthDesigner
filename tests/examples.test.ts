@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, expectTypeOf, it } from "vitest";
 import { productReviewGen } from "../examples/product-reviews";
+import { bugReportGen } from "../examples/bug-report-triage";
 import { structuredReviewGen } from "../examples/structured-reviews";
 import { FakerGen } from "../src/faker";
 import {
@@ -280,6 +281,38 @@ it("DataDesigner's tutorial 2: structured replies, expressions, skipped fields (
   // 8 products, 8 reviews, 8 summaries, and 2 more calls per low rating.
   expect(mock.requests).toHaveLength(24 + 2 * records.filter((x) => x.customerReview.rating <= 2).length);
   console.log(records[0]);
+});
+
+it("bug-report triage: a typed LLM reply feeding another, an incident note for the worst (examples/bug-report-triage.ts)", async () => {
+  let triages = 0;
+  const mock = new MockProvider({
+    respond: ({ prompt }) =>
+      prompt.startsWith("You are ")
+        ? JSON.stringify({ title: "Cart empties", stepsToReproduce: ["Add an item", "Pay"], expected: "Paid", actual: "Cart is empty" })
+        : prompt.startsWith("You triage bugs")
+          ? JSON.stringify({ component: "payments", priority: triages++ % 3 === 0 ? "P0" : "P2", duplicateLikely: false, rationale: "Blocks checkout." })
+          : `echo: ${prompt}`,
+  });
+  const { records } = await preview({
+    gen: bugReportGen,
+    numRecords: 12,
+    seed: 1,
+    providers: { mock },
+    models: { writer: { provider: "mock", model: "echo" } },
+  });
+  for (const b of records) {
+    expect("reporter" in b).toBe(false); // .temp(): shapes the prompt, then dropped
+    const { platform, os, browser } = b.environment;
+    if (platform !== "web") expect(browser).toBe("native app");
+    else expect(browser === "native app" || (browser === "Safari" && os !== "macOS")).toBe(false);
+    expect(b.environment.appVersion).toMatch(/^4\.\d+\.\d$/);
+    const worst = b.severity === "critical" || b.triage.priority === "P0";
+    expect(b.incidentNote !== undefined).toBe(worst);
+    expect(b.ticketText.includes('"Incident" section')).toBe(worst);
+  }
+  const reportPrompts = mock.requests.filter((q) => q.prompt.startsWith("You are "));
+  expect(reportPrompts.some((q) => q.prompt.includes("numbered steps"))).toBe(true);
+  expect(reportPrompts.some((q) => q.prompt.includes("not technical"))).toBe(true);
 });
 
 it("conditional fields: MatchGen (DataDesigner's conditional params and skipped columns)", async () => {
