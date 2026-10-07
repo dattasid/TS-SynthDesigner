@@ -313,18 +313,29 @@ it("bug-report triage: pre-decided specs, a typed LLM reply feeding another, an 
     if (platform !== "web") expect(browser).toBe("native app");
     else expect(browser === "native app" || (browser === "Safari" && os !== "macOS")).toBe(false);
     expect(b.environment.appVersion).toMatch(/^4\.\d+\.\d$/);
-    const worst = b.severity === "critical" || b.priority === "P0"; // the priority was decided, not the LLM
+    // The ticket has the priority the prompts used; bad_priority stores another one.
+    const truePriority = b.ticketText.match(/Priority: (P\d)/)![1] as typeof b.priority;
+    expect(truePriority === b.priority).toBe(b.pathology === "none");
+    const worst = b.severity === "critical" || truePriority === "P0"; // the priority was decided, not the LLM
     expect(b.incidentNote !== undefined).toBe(worst);
     expect(b.ticketText.includes('"Incident" section')).toBe(worst);
-    expect(b.ticketText).toContain(`Priority: ${b.priority}`);
   }
+  expect(records.some((b) => b.pathology === "bad_priority")).toBe(true);
+  // The triage names the priority in about a quarter of rows, and always for bad_priority.
+  const triagePrompts = mock.requests.filter((q) => q.prompt.startsWith("You triage"));
+  const named = triagePrompts.filter((q) => q.prompt.includes("must name the priority")).length;
+  expect(named).toBeGreaterThan(0);
+  expect(named).toBeLessThan(triagePrompts.length / 2);
   const reportPrompts = mock.requests.filter((q) => q.prompt.startsWith("You are "));
   for (const detail of ["Write vaguely", "Leave reproCode null", "in reproCode."]) {
     expect(reportPrompts.some((q) => q.prompt.includes(detail))).toBe(true);
   }
   // A priority 2+ steps from the severity comes with a reason for the triage to explain.
   const rank = { low: 0, medium: 1, high: 2, critical: 3, P3: 0, P2: 1, P1: 2, P0: 3 };
-  const mismatched = records.filter((b) => Math.abs(rank[b.priority] - rank[b.severity]) >= 2).length;
+  const mismatched = records.filter((b) => {
+    const truePriority = b.ticketText.match(/Priority: (P\d)/)![1] as typeof b.priority;
+    return Math.abs(rank[truePriority] - rank[b.severity]) >= 2;
+  }).length;
   const explained = mock.requests.filter((q) => q.prompt.startsWith("You triage") && q.prompt.includes("unusual for this severity"));
   expect(explained).toHaveLength(mismatched);
   // Only power users are asked for repro code.

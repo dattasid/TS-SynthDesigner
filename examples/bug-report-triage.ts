@@ -1,6 +1,7 @@
 // Bug-report triage: synthetic issue tracker data, one record per bug. A nested environment with a
 // cross-field constraint, a reporter that shapes the prompt but is dropped, a typed LLM report that
-// feeds a typed LLM triage, and an incident note only for the worst bugs. Runs on OpenRouter into
+// feeds a typed LLM triage, and an incident note only for the worst bugs. A few records are corrupted
+// on purpose (`pathology`), as test data for a checker. Runs on OpenRouter into
 // scratch/bug-report-triage.jsonl:
 //   npx tsx examples/bug-report-triage.ts [numRecords]
 // Needs an OpenRouter key in the env var OPENROUTER_API_KEY or in a file of that name.
@@ -14,7 +15,6 @@ import {
   ConditionalRejectionResamplerGen,
   create,
   CustomGen,
-  FunctionGen,
   json,
   LLMStructuredGen,
   LLMTextGen,
@@ -87,6 +87,7 @@ export const IssueSpecTemp = s.object({
   // Why the priority is far from the severity, when it is: drawn here, explained by the LLM.
   priorityReason: s.string().optional(),
   detail: s.enum(["detailed", "detailedWReproCode", "vague"]), // only power users have repro code
+  mentionPriority: s.boolean(), // the triage names the priority ("moved to P0"); always for bad_priority
 }, { name: "issueSpec" });
 export type IssueSpec = Infer<typeof IssueSpecTemp>;
 
@@ -96,12 +97,15 @@ const urgencyRank = { P3: 0, P2: 1, P1: 2, P0: 3 } as const;
 const priorityGap = (severity: BugReport["severity"], priority: IssueSpec["priority"]) => urgencyRank[priority] - severityRank[severity];
 
 export const BugReport = s.object({
+  // A deliberate defect, the label for a checker. bad_priority: the stored priority is not the one
+  // the triage and ticket were written for.
+  pathology: s.enum(["none", "bad_priority"]),
   area: s.enum(["checkout", "search", "auth", "notifications"]),
   severity: s.enum(["low", "medium", "high", "critical"]),
   environment: Environment,
   reporter: Reporter.temp(),
   issueSpec: IssueSpecTemp.temp(), // shapes the prompts, then dropped
-  priority: s.enum(["P0", "P1", "P2", "P3"]), // issueSpec's, kept in the record
+  priority: s.enum(["P0", "P1", "P2", "P3"]), // issueSpec's, kept in the record; another one for bad_priority
   report: Report,
   triage: Triage,
   triageReasoning: s.string().optional(), // only reasoning models send it
@@ -155,6 +159,7 @@ export const bugReportGen = new TreeGen({
   id: "bug",
   schema: BugReport,
   fields: {
+    pathology: new CategorySamplerGen<BugReport["pathology"]>({ values: { none: 95, bad_priority: 5 } }),
     area: new CategorySamplerGen<BugReport["area"]>({ values: { checkout: 2, search: 3, auth: 2, notifications: 1 } }),
     // Mostly minor bugs: the first value is the most likely.
     severity: new CategorySamplerGen<BugReport["severity"]>({ values: ["low", "medium", "high", "critical"], skew: "zipf" }),
@@ -206,9 +211,21 @@ export const bugReportGen = new TreeGen({
             "power user": { vague: 1, detailed: 2, detailedWReproCode: 2 },
           },
         }).bind({ category: r.reporter.techSavvy }),
+        mentionPriority: CustomGen.bound({
+          inputs: { pathology: r.pathology },
+          fn: ({ pathology }, ctx) => pathology === "bad_priority" || ctx.rng.random() < 0.25,
+        }),
       },
     }),
-    priority: FunctionGen.bound({ inputs: { priority: r.issueSpec.priority }, fn: ({ priority }) => priority }),
+    // The prompts all use issueSpec's priority; only this field is corrupted.
+    priority: CustomGen.bound({
+      inputs: { priority: r.issueSpec.priority, pathology: r.pathology },
+      fn: ({ priority, pathology }, ctx): BugReport["priority"] => {
+        if (pathology !== "bad_priority") return priority;
+        const others = (["P0", "P1", "P2", "P3"] as const).filter((p) => p !== priority);
+        return others[ctx.rng.int(0, others.length - 1)];
+      },
+    }),
 
     report: new LLMStructuredGen({
       model: "writer",
@@ -237,7 +254,7 @@ ${json(r.environment)}
     triage: new LLMStructuredGen({
       model: "writer",
       schema: Triage,
-      prompt: prompt`You triage bugs for a shopping app. Reported severity: ${r.severity}. Area: ${r.area}. The priority has been set to ${r.priority} (P0: drop everything, P3: someday).
+      prompt: prompt`You triage bugs for a shopping app. Reported severity: ${r.severity}. Area: ${r.area}. The priority has been set to ${r.issueSpec.priority} (P0: drop everything, P3: someday).
 Environment:
 ${json(r.environment)}
 
@@ -251,13 +268,22 @@ ${match({
     then: prompt`The priority is unusual for this severity, because ${r.issueSpec.priorityReason}. The rationale must explain this.
 `,
   }],
+})}${match({
+  inputs: { mention: r.issueSpec.mentionPriority },
+  cases: [{
+    when: ({ mention }) => mention,
+    then: prompt`The rationale must name the priority, ${r.issueSpec.priority}, as a triager would (e.g. "moving to ${r.issueSpec.priority}", "prio is ${r.issueSpec.priority}").
+`,
+  }],
+  otherwise: `Do not name the priority level (P0 to P3) in the rationale.
+`,
 })}Pick the component, say whether it is likely a duplicate, and explain the component and the priority in the rationale.`,
     }),
     triageReasoning: reasoningOf(r.triage),
 
     // No otherwise: most rows get no note and make no call.
     incidentNote: new MatchGen({
-      inputs: { severity: r.severity, priority: r.priority },
+      inputs: { severity: r.severity, priority: r.issueSpec.priority },
       cases: [{
         when: ({ severity, priority }) => severity === "critical" || priority === "P0",
         then: new LLMTextGen({
@@ -271,7 +297,7 @@ ${json(r.report)}`,
     ticketText: new LLMTextGen({
       model: "writer",
       prompt: prompt`Render this bug as a ticket in Markdown: title, priority, component, environment, steps, expected and actual, and the repro code if there is any.
-Priority: ${r.priority}
+Priority: ${r.issueSpec.priority}
 Report:
 ${json(r.report)}
 Triage:
