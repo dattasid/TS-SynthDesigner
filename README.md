@@ -330,7 +330,7 @@ mistakes that must not compile; `npm test` fails if any of them starts compiling
 
 ## Running it
 
-Not on npm. Clone it and install:
+Clone it and install:
 
 ```sh
 git clone https://github.com/dattasid/TS-SynthDesigner.git
