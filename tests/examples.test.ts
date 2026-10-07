@@ -463,7 +463,7 @@ it("an LLM's reasoning in its own field", async () => {
     },
   });
 
-  // For real: providers: { openRouter: Provider.openRouter() }, models: { thinker: { provider: "openRouter", model: "qwen/qwen3.8-flash" } }
+  // For real: providers: { openRouter: Provider.openRouter() }, models: { thinker: { provider: "openRouter", model: "openai/gpt-6-luna" } }
   const mock = new MockProvider({ respond: () => ({ text: "Light scatters.", reasoning: "Rayleigh scattering..." }) });
   const { records } = await preview({ gen: qa, numRecords: 2, seed: 1, providers: { mock }, models: { thinker: { provider: "mock", model: "m" } } });
   console.table(records);

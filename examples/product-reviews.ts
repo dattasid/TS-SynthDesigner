@@ -19,7 +19,7 @@ const providers = {
 const models = {
   writer: {
     provider: "openrouter",
-    model: "qwen/qwen3.8-flash",
+    model: "openai/gpt-6-luna",
     temperature: 1,
     topP: 0.95,
     maxTokens: 2048,

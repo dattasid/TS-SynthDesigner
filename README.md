@@ -157,7 +157,7 @@ const { records } = await preview({
   numRecords: 10,
   seed: 1,
   providers: { openrouter: Provider.openRouter() }, // key from OPENROUTER_API_KEY
-  models: { "review-writer-model": { provider: "openrouter", model: "qwen/qwen3.8-flash", temperature: 1 } },
+  models: { "review-writer-model": { provider: "openrouter", model: "openai/gpt-6-luna", temperature: 1 } },
 });
 records[0].review.mood; // typed: "happy" | "neutral" | "mad"
 ```
