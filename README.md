@@ -105,9 +105,9 @@ In the editor, as you type:
 
 | | |
 |---|---|
-| ![fields is empty](screenshots/synthdata1.png) | `fields: {}` is empty: every field of the schema needs a generator. |
-| ![platform values are not platforms](screenshots/synthdata2.png) | `platform` is typed as `"web" \| "ios" \| "android"`, so each value that is not a platform is flagged. |
-| ![os map is missing web](screenshots/synthdata3.png) | The OS map is keyed by platform, and `web` is commented out: the map must cover every platform. |
+| ![fields is empty](screenshots/ide_error1.png) | `fields: {}` is empty: every field of the schema needs a generator. |
+| ![platform values are not platforms](screenshots/ide_error2.png) | `platform` is typed as `"web" \| "ios" \| "android"`, so each value that is not a platform is flagged. |
+| ![os map is missing web](screenshots/ide_error3.png) | The OS map is keyed by platform, and `web` is commented out: the map must cover every platform. |
 
 What types cannot see (bounds, enum values from an LLM, plain JavaScript) is checked at runtime:
 every record is validated against its schema, and the error names the record and the field.
