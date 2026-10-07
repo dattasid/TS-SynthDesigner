@@ -83,10 +83,17 @@ export const Triage = s.object({
 
 // Pre-decide a few things, dont let LLM decide
 export const IssueSpecTemp = s.object({
-  priority: s.enum(["P0", "P1", "P2", "P3"]), // weighted
+  priority: s.enum(["P0", "P1", "P2", "P3"]), // weighted by severity: mostly in line, sometimes not
+  // Why the priority is far from the severity, when it is: drawn here, explained by the LLM.
+  priorityReason: s.string().optional(),
   detail: s.enum(["detailed", "detailedWReproCode", "vague"]), // only power users have repro code
 }, { name: "issueSpec" });
 export type IssueSpec = Infer<typeof IssueSpecTemp>;
+
+// Severity is technical impact, priority is business urgency. A gap of 2 or more steps needs a reason.
+const severityRank = { low: 0, medium: 1, high: 2, critical: 3 } as const;
+const urgencyRank = { P3: 0, P2: 1, P1: 2, P0: 3 } as const;
+const priorityGap = (severity: BugReport["severity"], priority: IssueSpec["priority"]) => urgencyRank[priority] - severityRank[severity];
 
 export const BugReport = s.object({
   area: s.enum(["checkout", "search", "auth", "notifications"]),
@@ -156,7 +163,42 @@ export const bugReportGen = new TreeGen({
     issueSpec: new TreeGen({
       schema: IssueSpecTemp,
       fields: {
-        priority: new CategorySamplerGen<IssueSpec["priority"]>({ values: { P0: 1, P1: 2, P2: 4, P3: 3 } }),
+        priority: new SubCategorySamplerGen<BugReport["severity"], IssueSpec["priority"]>({
+          values: {
+            low: { P0: 1, P1: 2, P2: 10, P3: 20 },
+            medium: { P0: 1, P1: 4, P2: 12, P3: 4 },
+            high: { P0: 4, P1: 12, P2: 3, P3: 1 },
+            critical: { P0: 20, P1: 6, P2: 1, P3: 1 },
+          },
+        }).bind({ category: r.severity }),
+        // Only the mismatches get a reason; the others stay undefined.
+        priorityReason: new MatchGen({
+          inputs: { severity: r.severity, priority: r.issueSpec.priority },
+          cases: [
+            {
+              when: ({ severity, priority }) => priorityGap(severity, priority) <= -2, // bad bug, fixed later
+              then: new CategorySamplerGen({
+                values: [
+                  "there is an easy workaround",
+                  "it is in a feature being retired next quarter",
+                  "it only happens in a rare edge case",
+                  "the fix needs a large refactor that is already scheduled",
+                ],
+              }),
+            },
+            {
+              when: ({ severity, priority }) => priorityGap(severity, priority) >= 2, // small bug, fixed now
+              then: new CategorySamplerGen({
+                values: [
+                  "a key enterprise customer reported it",
+                  "it is on the homepage, seen by every visitor",
+                  "the wording has legal or compliance implications",
+                  "it is on a screen in next week's launch demo",
+                ],
+              }),
+            },
+          ],
+        }),
         // Keyed by the reporter's skill: novices never send repro code.
         detail: new SubCategorySamplerGen<Reporter["techSavvy"], IssueSpec["detail"]>({
           values: {
@@ -202,7 +244,14 @@ ${json(r.environment)}
 Report:
 ${json(r.report)}
 
-Pick the component, say whether it is likely a duplicate, and explain the component and the priority in the rationale.`,
+${match({
+  inputs: { reason: r.issueSpec.priorityReason },
+  cases: [{
+    when: ({ reason }) => reason !== undefined,
+    then: prompt`The priority is unusual for this severity, because ${r.issueSpec.priorityReason}. The rationale must explain this.
+`,
+  }],
+})}Pick the component, say whether it is likely a duplicate, and explain the component and the priority in the rationale.`,
     }),
     triageReasoning: reasoningOf(r.triage),
 
