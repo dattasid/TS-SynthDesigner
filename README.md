@@ -2,16 +2,16 @@
 
 **Synthetic data generation for TypeScript: schema-first trees, DAG dependency tracking, typed LLM calls.**
 
-A typed, schema-based synthetic data generator where every row is a fully qualified object, with optional sub-objects of its own. Compile time type checks make it easier to quickly catch typos, silly mistakes and get better IDE autocomplete suggestions. This is backed up by full runtime validation.
+A typed, schema-based synthetic data generator where every row is a fully qualified object, with optional sub-objects of its own. Compile-time type checks catch typos and wiring mistakes early, and give better IDE autocomplete. This is backed up by full runtime validation.
 
-Each field can generate data based on other fields already assigned. The fields are generated in correct order at runtime, including waiting for LLM calls.
+Each field can generate data based on other fields already assigned. The fields are generated in the correct order at runtime, including waiting for LLM calls.
 
 Inspired by [NVIDIA NeMo Data Designer](https://github.com/NVIDIA-NeMo/DataDesigner), and ports two of its
 tutorials (see [Examples](#examples)). This is an independent project, not affiliated with NVIDIA.
 
 ## Highlights
 
-- **Compile-time checks.** Type checking ensures you have hooked up the correct generators, dependencies are guaranteed correct even when tracking an object tree, eg: `person.friend.address`, callbacks know their argument types, LLMs return known types.
+- **Compile-time checks.** Type checking ensures you have hooked up the correct generators, dependencies are guaranteed correct even when tracking an object tree, e.g. `person.friend.address`, callbacks know their argument types, LLMs return known types.
 - **Typed, validated LLM replies.** One schema gives the TypeScript type, the shape the model is
   told to reply in, and the check of each reply. An invalid reply is retried, with the model shown
   exactly what was wrong.
@@ -291,7 +291,7 @@ const dups = await preview({ gen: dupGen, numRecords: 10, seed, startIndex: orig
 
 ## Effortless deep references
 
-Let us create an `Address` schema which can be subtree of a `Person` schema.
+Let's create an `Address` schema which can be a subtree of a `Person` schema.
 
 ```ts
 const Address = s.object({ country: s.string(), city: s.string() });
@@ -308,7 +308,7 @@ const addressGen = new TreeGen({
 });
 ```
 
-Now let us create a `Job` schema, but remember that person must work in their home country.
+Now let's create a `Job` schema, where the person must work in their home country.
 
 ```ts
 const Job = s.object({ title: s.string(), city: s.string(), commute: s.string() });
@@ -387,11 +387,10 @@ npm test        # tsc, then vitest
 
 `preview()` returns records in memory; `create()` writes them to a JSONL file batch by batch.
 
-## Status
+## Roadmap
 
-1. Consolidated builder, more convenient, less type checks.
-2. Granular random seeds.
-3. Array fields backed by any type of generator.
+1. Consolidated builder, more convenient, fewer type checks.
+2. Array fields backed by any type of generator.
 
 ## License
 

@@ -8,15 +8,13 @@ wrong. That makes the file useful test data for a checker, a dedup model, or an 
 Every record comes from the generator in [`bug-report-triage.ts`](bug-report-triage.ts): about
 400 lines, with every field typed.
 
-The deliberate errors we introduce are:
-1. Wrong priority: The triage will mention setting a certain priority but the bug will be set to something different.
-2. Missing duplicate ID: The triage will mention this is a duplicate, but the duplicate id field is not set.
+The deliberate errors we introduce are (details in [The planted defects](#the-planted-defects)):
+1. Wrong priority: the triage names one priority, but the bug's `priority` field holds a different one.
+2. Missing duplicate ID: the triage says the bug is a duplicate, but `duplicateOf` is not set.
 
 ## One bug and its duplicate
 
-The problem with randomly generating duplicate bugs, in a framework like this is - a row is not allowed to look at other rows being generated in the same run. This is because when a field of row2 is being generated, row1 might not have finished generating everything and might be waiting on LLM calls.
-
-We solve this by generating no duplicate bugs in one run, then generating duplicates only on another run. Our framework allows looking at another finished run as shared readonly data.
+Two runs, two reporters, two platforms, the same bug:
 
 | | BUG-KXBMK (original) | BUG-4AMUX (`duplicateOf: "BUG-KXBMK"`) |
 |---|---|---|
@@ -49,7 +47,7 @@ seed 2026, model `openai/gpt-6-luna`.
 
 | | |
 |---|---|
-| kind | 85 originals, 10 duplicates, 5 duplicates without an id |
+| kind | 85 originals, 10 duplicates, 5 duplicates without an ID |
 | pathology | none 89, bad_priority 6, dup_no_id 5 |
 | area | search 39, checkout 26, auth 20, notifications 15 |
 | severity | low 41, medium 30, high 18, critical 11 |
@@ -58,13 +56,13 @@ seed 2026, model `openai/gpt-6-luna`.
 | incident notes | 20 (every critical or P0 bug) |
 
 Checked on this file:
-- All 10 duplicates name their original's id in the triage.
-- All 5 dup_no_id rows say "duplicate of an existing issue", with no id.
+- All 10 duplicates name their original's ID in the triage.
+- All 5 dup_no_id rows say "duplicate of an existing issue", with no ID.
 - None of the other 85 rows calls itself a duplicate.
 - All 6 bad_priority rationales name the priority the bug was triaged with, not the stored one.
 - No rationale argues with its priority, so only the bad_priority rows disagree with it.
 
-The same seed gives the same sampled values: ids, areas, environments, which bugs are duplicated
+The same seed gives the same sampled values: IDs, areas, environments, which bugs are duplicated
 and which are corrupted. The LLM's text can differ from run to run.
 
 ## How it is built
@@ -72,7 +70,7 @@ and which are corrupted. The LLM's text can differ from run to run.
 ### The LLM does not sample or make random choices
 
 LLMs are known for being biased samplers. They will pick options more common in their training data, dragging the entire generated dataset towards the mode.
-This is why we decide the actual properties of what to randomly generate in code. Then we ask the LLM to add flavor text, or to make choices that are not as important.
+This is why we make every random choice in code. Then we ask the LLM to add flavor text, or to make choices that are not as important.
 For example: we pick the bug priority level in code. Then we ask the LLM to generate text that reflects this decision.
 
 ```ts
@@ -132,6 +130,10 @@ asked for repro code.
 
 ### Duplicates: a second run that reads the first
 
+Duplicates are tricky here: a row can't look at other rows of the same run, because they may still
+be waiting on LLM calls. So the first run makes no duplicates, and a second run makes only
+duplicates, reading the finished first run as shared read-only data.
+
 ```ts
 const originals = await preview({ gen: bugReportGen, numRecords: 85, seed });
 const duplicates = await preview({
@@ -149,17 +151,17 @@ the reporter, the environment and all the prompts, is the original tree's. The r
 The dup_no_id run is the same clone without `duplicateOf`: the triage says "duplicate", but the
 record does not say of what.
 
-### Ids that give nothing away
+### IDs that give nothing away
 
-The way we generate, all duplicate bug rows are next to each other. We can shuffle, but then bugs are not in order, and duplicates might seemingly refer to bugs filed later. The solution was to hash the bug ids, so each id remains unique but they look like UUIDs.
+Each run's rows come out together, so with sequential IDs the duplicates would sit in their own ID range, even after shuffling. The solution was to scramble the IDs with a seeded permutation, so each stays unique but reveals nothing about when or by which run it was made.
 
 ```ts
 id: new UniqueIdGen({ prefix: "BUG-", length: 5 }),
 ```
 
-The row index goes through a seeded Feistel permutation, so ids never repeat, across the three runs
+The row index goes through a seeded Feistel permutation, so IDs never repeat, across the three runs
 too, and they are not in row order. The runs' records are shuffled together at the end. So neither
-the position nor the id tells a checker which run made a record.
+the position nor the ID tells a checker which run made a record.
 
 ### The planted defects
 
