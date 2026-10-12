@@ -13,6 +13,7 @@ import {
   prompt,
   rootRefs,
   SchemaBuilder,
+  SourceRowGen,
   TreeGen,
   type Infer,
 } from "../src/index";
@@ -91,5 +92,51 @@ describe("ConstantGen", () => {
 
     expect(() => new ConstantGen({ value: { at: () => 1 } })).toThrow(ConfigError);
     expect(() => new ConstantGen({ value: { at: () => 1 } })).toThrow(/ConstantGen: value must be plain data/);
+  });
+});
+
+describe("SourceRowGen", () => {
+  const Dup = s.object({ source: s.object({ id: s.string() }), copyOf: s.string() });
+  const r = rootRefs(Dup);
+  const rows = [{ id: "A" }, { id: "B" }, { id: "C" }, { id: "D" }];
+  const run = (pick: "ordered" | "shuffle" | "random", startIndex = 0, numRecords = 8, seed = 1) =>
+    previewSync({
+      gen: new TreeGen({
+        schema: Dup,
+        fields: {
+          source: new SourceRowGen({ rows, pick }),
+          copyOf: FunctionGen.bound({ inputs: { id: r.source.id }, fn: ({ id }) => `copy of ${id}` }),
+        },
+      }),
+      numRecords,
+      seed,
+      startIndex,
+    }).records;
+
+  it("serves rows in order, shuffled, or at random, counted from the run's first row", () => {
+    expect(run("ordered", 100).map((x) => x.source.id).join("")).toBe("ABCDABCD");
+    expect(run("ordered")[2]).toEqual({ source: { id: "C" }, copyOf: "copy of C" });
+
+    const shuffled = run("shuffle").map((x) => x.source.id);
+    expect(new Set(shuffled.slice(0, 4)).size).toBe(4); // every row once before any repeats
+    expect(shuffled.slice(4)).toEqual(shuffled.slice(0, 4));
+    expect(run("shuffle", 50)).toEqual(run("shuffle")); // the order is per run, not per index
+    const orders = new Set([1, 2, 3, 4, 5, 6].map((seed) => run("shuffle", 0, 4, seed).map((x) => x.source.id).join("")));
+    expect(orders.size).toBeGreaterThan(1);
+
+    const random = run("random", 0, 40).map((x) => x.source.id);
+    expect(new Set(random).size).toBe(4);
+    expect(random.slice(0, 4).join("")).not.toBe(random.slice(4, 8).join("")); // not a fixed cycle
+  });
+
+  it("copies and freezes the rows; checks its params", () => {
+    const source = [{ id: "A" }];
+    const gen = new SourceRowGen({ rows: source });
+    source[0]!.id = "changed";
+    expect(gen.rows[0]!.id).toBe("A");
+    expect(Object.isFrozen(gen.rows[0])).toBe(true);
+    expect(() => new SourceRowGen({ rows: [] })).toThrow(/rows must be a non-empty array/);
+    expect(() => new SourceRowGen({ rows, pick: "best" as never })).toThrow(/pick must be/);
+    expect(() => new SourceRowGen({ rows: [() => 1] })).toThrow(/plain data/);
   });
 });

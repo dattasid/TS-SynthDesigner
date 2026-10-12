@@ -1,6 +1,7 @@
-import type { Context } from "./context";
+import type { Context, Global } from "./context";
 import { ConfigError } from "./errors";
 import { BaseGen, BoundGen, type MaybePromise, type Ref } from "./gen";
+import { Sfc32 } from "./rng";
 
 /** The value type a ref points to: `Ref<number>` -> `number`. */
 export type RefValue<R> = R extends Ref<infer V> ? V : never;
@@ -108,6 +109,78 @@ export class ConstantGen<T> extends BaseGen<T> {
 
   generate(): T {
     return this.value;
+  }
+}
+
+export interface SourceRowGenParams<T> {
+  id?: string;
+  /** The rows to serve, e.g. the records of an earlier run. Copied once and frozen, like ConstantGen's value. */
+  rows: readonly T[];
+  /**
+   * Which row each row of the run gets (default "ordered"), counting from the run's first row:
+   * - "ordered": rows 0, 1, 2..., starting over at the end.
+   * - "shuffle": all rows in a seeded random order, then the same order again. No row is served twice
+   *   until all have been.
+   * - "random": any row, drawn for each row, so some come twice.
+   */
+  pick?: "ordered" | "shuffle" | "random";
+}
+
+/**
+ * Serves rows of a dataset made elsewhere, typically an earlier run, one per row: DataDesigner's seed
+ * dataset. Its fields can then be read like any other, e.g. for duplicates of earlier records:
+ *
+ *     const first = await preview({ gen: bugGen, numRecords: 200, seed });
+ *     const dupGen = bugGen.clone({ fields: {
+ *       source: new SourceRowGen({ rows: first.records.map(({ id, title }) => ({ id, title })), pick: "shuffle" }),
+ *       duplicateOf: FunctionGen.bound({ inputs: { id: r.source.id }, fn: ({ id }) => id }),
+ *     } });
+ *     const dups = await preview({ gen: dupGen, numRecords: 20, seed, startIndex: first.nextIndex });
+ *
+ * Which row is served depends only on the seed and the row's index, like everything else.
+ */
+export class SourceRowGen<T> extends BaseGen<T> {
+  readonly rows: readonly T[];
+  readonly pick: "ordered" | "shuffle" | "random";
+  /** The shuffled order, per run and field path. */
+  private readonly orders = new WeakMap<Global, Map<string, number[]>>();
+
+  constructor({ id, rows, pick = "ordered" }: SourceRowGenParams<T>) {
+    super(id);
+    this.check(Array.isArray(rows) && rows.length > 0, "rows must be a non-empty array.");
+    this.check(["ordered", "shuffle", "random"].includes(pick), `pick must be "ordered", "shuffle" or "random", got ${JSON.stringify(pick)}.`);
+    let copy: T[];
+    try {
+      copy = structuredClone(rows as T[]);
+    } catch (error) {
+      throw new ConfigError(`${this.describe()}: rows must be plain data, since they are copied once: ${(error as Error).message}`);
+    }
+    this.rows = deepFreeze(copy);
+    this.pick = pick;
+  }
+
+  generate(_inputs: {}, ctx: Context): T {
+    const n = this.rows.length;
+    if (this.pick === "random") return this.rows[ctx.rng.int(0, n - 1)]!;
+    const i = (ctx.row.index - ctx.global.startIndex) % n;
+    return this.rows[this.pick === "ordered" ? i : this.order(ctx)[i]!]!;
+  }
+
+  private order(ctx: Context): number[] {
+    let byPath = this.orders.get(ctx.global);
+    if (!byPath) this.orders.set(ctx.global, (byPath = new Map()));
+    let order = byPath.get(ctx.pathString);
+    if (!order) {
+      // Fisher-Yates, from a stream of the run's seed and the field path: the same order for every row.
+      const rng = new Sfc32(ctx.global.seed).fork(`SourceRowGen:${ctx.pathString}`);
+      order = Array.from(this.rows, (_, i) => i);
+      for (let i = order.length - 1; i > 0; i--) {
+        const j = rng.int(0, i);
+        [order[i], order[j]] = [order[j]!, order[i]!];
+      }
+      byPath.set(ctx.pathString, order);
+    }
+    return order;
   }
 }
 

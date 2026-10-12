@@ -4,11 +4,13 @@ export {
   ConstantGen,
   CustomGen,
   FunctionGen,
+  SourceRowGen,
   type ConstantGenParams,
   type CustomGenBoundParams,
   type CustomGenParams,
   type RefValue,
   type RefValues,
+  type SourceRowGenParams,
 } from "./custom";
 export {
   BaseGen,
