@@ -23,6 +23,8 @@ export interface CreateResults {
   numRecords: number;
   /** Pass this back as `seed` to get the same records again. */
   seed: readonly number[];
+  /** The index after the last row: the `startIndex` for a run that continues this one. */
+  nextIndex: number;
 }
 
 /**
@@ -43,12 +45,12 @@ export async function create<G extends Gen<unknown>>(params: CreateParams<G>): P
   try {
     let written = 0;
     for (const size of batches) {
-      const records = await plan.runBatch(ctx, size);
+      const records = await plan.runBatch(ctx, size, { first: ctx.global.startIndex + written });
       const lines = records.map((record, i) => toLine(finish(record, written + i), written + i));
       await file.write(lines.join(""));
       written += size;
     }
-    return { path, numRecords: written, seed: ctx.seed };
+    return { path, numRecords: written, seed: ctx.seed, nextIndex: ctx.global.startIndex + written };
   } finally {
     await file.close();
   }

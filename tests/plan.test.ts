@@ -260,10 +260,10 @@ describe("Plan", () => {
       CustomGen.bound({
         inputs: { topic: p.topic },
         fn: async ({ topic }, ctx) => {
-          const draw = ctx.rng.int(0, 999); // randomness before the first await
           maxInFlight = Math.max(maxInFlight, ++inFlight);
           await new Promise((resolve) => setTimeout(resolve, Math.random() * 5));
           inFlight--;
+          const draw = ctx.rng.int(0, 999); // after the await: each row has its own stream
           return `${label}:${topic}:${draw}`;
         },
       });
@@ -288,5 +288,40 @@ describe("Plan", () => {
 
     expect(() => previewSync({ gen: tree, numRecords: 1, seed: 5 })).toThrow(GenerationError);
     expect(() => previewSync({ gen: tree, numRecords: 1, seed: 5 })).toThrow(/field 'a' returned a Promise/);
+  });
+
+  it("rows: each depends only on the seed and its index, so any range can be made on its own", () => {
+    const Row = s.object({ i: s.integer(), id: s.string(), n: s.integer() });
+    const tree = new TreeGen({
+      schema: Row,
+      fields: {
+        i: CustomGen.bound({ inputs: {}, fn: (_, ctx) => ctx.row.index }),
+        id: CustomGen.bound({ inputs: {}, fn: (_, ctx) => `ID-${1000 + ctx.row.index}` }),
+        n: new NumberSamplerGen({ type: "uniform", low: 0, high: 1e9, integer: true }),
+      },
+    });
+    const all = previewSync({ gen: tree, numRecords: 10, seed: 3 });
+    expect(all.records.map((r) => r.i)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    expect(all.records[4]!.id).toBe("ID-1004");
+    expect(all.nextIndex).toBe(10);
+    const middle = previewSync({ gen: tree, numRecords: 3, seed: 3, startIndex: 4 });
+    expect(middle.records).toEqual(all.records.slice(4, 7));
+    expect(middle.nextIndex).toBe(7);
+    expect(new Set(all.records.map((r) => r.n)).size).toBe(10);
+
+    // Outside a run there is no row.
+    const id = new CustomGen({ fn: (_: {}, ctx) => ctx.row.index });
+    expect(() => id.generate({}, Context.create({ seed: 1 }))).toThrow(/ctx.row is only set while a run/);
+    expect(() => previewSync({ gen: tree, numRecords: 1, startIndex: -1 })).toThrow(RangeError);
+  });
+
+  it("the global context: one object per run, shared by every row", () => {
+    const seen = new Set<unknown>();
+    const Row = s.object({ a: s.integer(), b: s.integer() });
+    const probe = CustomGen.bound({ inputs: {}, fn: (_, ctx) => (seen.add(ctx.global), ctx.global.numRecords!) });
+    previewSync({ gen: new TreeGen({ schema: Row, fields: { a: probe, b: probe } }), numRecords: 5, seed: 1, startIndex: 2 });
+    expect(seen.size).toBe(1);
+    const [global] = seen as Set<Context["global"]>;
+    expect([global!.startIndex, global!.numRecords, global!.seed]).toEqual([2, 5, [1]]);
   });
 });

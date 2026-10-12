@@ -23,7 +23,7 @@ describe("create", () => {
   it("writes one JSON record per line, the same records preview gives for the seed", async () => {
     const path = join(await tempDir(), "out", "pets.jsonl"); // the "out" folder is made
     const result = await create({ gen: pet, numRecords: 7, seed: 4, batchSize: 3, path });
-    expect(result).toEqual({ path, numRecords: 7, seed: [4] });
+    expect(result).toEqual({ path, numRecords: 7, seed: [4], nextIndex: 7 });
     const lines = await readLines(path);
     expect(lines.pop()).toBe(""); // ends with a newline
     expect(lines.map((line) => JSON.parse(line))).toEqual((await preview({ gen: pet, numRecords: 7, seed: 4 })).records);

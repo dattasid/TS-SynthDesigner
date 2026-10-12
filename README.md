@@ -21,7 +21,7 @@ tutorials (see [Examples](#examples)). This is an independent project, not affil
   functions as generators, typed from their inputs.
 - **Prompt building.** Tagged-template prompts whose holes are typed refs, conditional sections
   (`match`), JSON for nested values, and only the rows that need an LLM call make one.
-- **Reproducible.** One seed gives the same data, at any batch size.
+- **Reproducible.** One seed gives the same data, at any batch size. Each row depends only on the seed and its index, so any range of rows can be made again on its own (`startIndex`).
 
 ## Quick look
 

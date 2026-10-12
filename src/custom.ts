@@ -39,10 +39,10 @@ export interface CustomGenBoundParams<R extends Record<string, Ref<unknown>>, Ou
  *       fn: ({ age }) => (age < 18 ? "Student" : "Engineer"),
  *     })
  *
- * Draw randomness only through `ctx.rng`, or through other Gens called with `ctx`.
+ * Draw randomness only through `ctx.rng` (the row's own stream), or through other Gens called with
+ * `ctx`. `ctx.row.index` is the row's index, e.g. for IDs: `` fn: (_, ctx) => `BUG-${10000 + ctx.row.index}` ``.
  *
- * `fn` may be async (e.g. to call an HTTP API); the field's type is still the awaited value. Draw any
- * randomness before the first `await`, so the draws happen in row order and the data is reproducible.
+ * `fn` may be async (e.g. to call an HTTP API); the field's type is still the awaited value.
  */
 export class CustomGen<Out, Inputs = {}> extends BaseGen<Out, Inputs> {
   readonly fn: (inputs: Inputs, ctx: Context) => MaybePromise<Out>;

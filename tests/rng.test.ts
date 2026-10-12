@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MersenneTwister } from "../src/index";
+import { MersenneTwister, Sfc32 } from "../src/index";
 
 describe("MersenneTwister", () => {
   it("matches the reference MT19937 outputs, and forks are stable", () => {
@@ -21,5 +21,21 @@ describe("MersenneTwister", () => {
     for (let i = 0; i < 1000; i++) used.random();
     expect(used.fork("age").random()).toBe(fresh.fork("age").random());
     expect(fresh.fork("age").random()).not.toBe(fresh.fork("name").random());
+  });
+});
+
+describe("Sfc32", () => {
+  it("is fixed by its key, and row streams differ", () => {
+    const draws = (rng: Sfc32) => [1, 2, 3].map(() => rng.nextUint32());
+    expect(draws(new Sfc32([7, 8]))).toEqual(draws(new Sfc32([7, 8])));
+    expect(draws(Sfc32.forRow([7], 0))).not.toEqual(draws(Sfc32.forRow([7], 1)));
+    expect(draws(Sfc32.forRow([7], 1))).not.toEqual(draws(Sfc32.forRow([8], 1)));
+    expect(draws(Sfc32.forRow([7], 1))).not.toEqual(draws(Sfc32.forRow([7], 2 ** 32 + 1))); // the high word counts
+    expect(new Sfc32([1]).fork("a").random()).toBe(new Sfc32([1]).fork("a").random());
+    // Rough uniformity: the first draw of 10000 row streams.
+    let sum = 0;
+    for (let i = 0; i < 10000; i++) sum += Sfc32.forRow([42], i).random();
+    expect(sum / 10000).toBeCloseTo(0.5, 1);
+    expect(() => new Sfc32([])).toThrow(RangeError);
   });
 });

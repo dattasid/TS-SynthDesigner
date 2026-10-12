@@ -1,4 +1,4 @@
-export { Context, type ContextParams, type ModelSpec } from "./context";
+export { Context, Global, type ContextParams, type ModelSpec, type RowInfo } from "./context";
 export { ConfigError, GenerationError } from "./errors";
 export {
   ConstantGen,
@@ -88,7 +88,7 @@ export {
 export { create, type CreateParams, type CreateResults } from "./create";
 export { dropTemps, type RecordOf } from "./output";
 export { preview, previewSync, type PreviewParams, type PreviewResults } from "./preview";
-export { MersenneTwister, type Rng } from "./rng";
+export { MersenneTwister, Sfc32, type Rng } from "./rng";
 export {
   CategorySamplerGen,
   SubCategorySamplerGen,

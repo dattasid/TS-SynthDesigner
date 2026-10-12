@@ -61,12 +61,10 @@ const feeds = (stepPath: Path, path: Path) => startsWith(stepPath, path) || star
  * all rows and fields, run in parallel. A level with no Promises never awaits, so a tree of sync Gens
  * runs as plain synchronous code.
  *
- * Reproducibility: each field has one random stream (see `contextFor`), shared by all rows. Every step
- * calls its Gen for rows 0, 1, 2... in order, so the draws happen in the same order on every run,
- * whatever the batch size and however long the async calls take. The rule for async Gens is to draw
- * before their first `await`. (Alternative, for out-of-order scheduling, resuming at row i or sharding:
- * a seed per row per field. Cheap if each seed feeds a small generator, e.g. sfc32 or xoshiro128**
- * seeded by hashing (seed, row, path); a Mersenne Twister per seed costs ~20 µs to set up. See Design.md.)
+ * Reproducibility: each row gets its own view of each field's context (`Context.forRow`), with a
+ * random stream forked from the seed, the field path and the row index. So a row's values depend only
+ * on the seed and its index: not on the rows before it, the batch size, or the order async calls
+ * finish in, and any row can be made again on its own (`runBatch` with `first` set to its index).
  */
 export class Plan<T> {
   /** Absolute paths of the steps, in the order they run. For inspection and tests. */
@@ -172,20 +170,23 @@ export class Plan<T> {
     }
   }
 
-  /** Generates one record. A Promise if an async Gen was involved. */
+  /**
+   * Generates one record: row `ctx.row.index` for a row's context (a tree nested in a Gen), else row 0.
+   * A Promise if an async Gen was involved.
+   */
   run(ctx: Context): MaybePromise<T> {
-    const batch = this.runBatch(ctx, 1);
+    const batch = this.runBatch(ctx, 1, { first: ctx.hasRow ? ctx.row.index : 0 });
     return batch instanceof Promise ? batch.then((records) => records[0]!) : batch[0]!;
   }
 
   /**
-   * Generates `count` records, level by level (see the class comment). Returns plain records if no
-   * Gen returned a Promise, otherwise a Promise of them. With `sync: true`, a Promise is an error
-   * naming the field, instead.
+   * Generates rows `first` to `first + count - 1`, level by level (see the class comment). Returns
+   * plain records if no Gen returned a Promise, otherwise a Promise of them. With `sync: true`, a
+   * Promise is an error naming the field, instead.
    */
-  runBatch(ctx: Context, count: number, { sync = false }: { sync?: boolean } = {}): MaybePromise<T[]> {
+  runBatch(ctx: Context, count: number, { first = 0, sync = false }: { first?: number; sync?: boolean } = {}): MaybePromise<T[]> {
     if (this.single) {
-      const values = Array.from({ length: count }, () => this.single!.generate({}, ctx));
+      const values = Array.from({ length: count }, (_, r) => this.single!.generate({}, ctx.forRow(first + r)));
       if (!values.some(isPromise)) return values as T[];
       if (sync) asyncError("<root>", values);
       return Promise.all(values) as Promise<T[]>;
@@ -203,14 +204,14 @@ export class Plan<T> {
       }
       rows.push(objects);
     }
-    return this.runLevels(rows, traces, ctx, 0, sync);
+    return this.runLevels(rows, traces, ctx, first, 0, sync);
   }
 
   /**
    * Runs levels from `from` on; at the first level that started Promises, awaits them and continues.
    * `traces[row][slot]` holds the traces of the traced steps, filled through `ctx.trace()`.
    */
-  private runLevels(rows: Record<string, unknown>[][], traces: Trace[][], ctx: Context, from: number, sync: boolean): MaybePromise<T[]> {
+  private runLevels(rows: Record<string, unknown>[][], traces: Trace[][], ctx: Context, first: number, from: number, sync: boolean): MaybePromise<T[]> {
     for (let level = from; level < this.stepLevels.length; level++) {
       const pending: Promise<void>[] = [];
       for (const step of this.stepLevels[level]!) {
@@ -219,14 +220,14 @@ export class Plan<T> {
           const objects = rows[r]!;
           const inputs: Record<string, unknown> = {};
           for (const { name, path, trace } of step.inputs) inputs[name] = trace < 0 ? read(objects[0]!, path) : traces[r]![trace];
-          const value = step.gen.generate(inputs, step.traceSlot < 0 ? stepCtx : stepCtx.withTrace(traces[r]![step.traceSlot]!));
+          const value = step.gen.generate(inputs, stepCtx.forRow(first + r, step.traceSlot < 0 ? undefined : traces[r]![step.traceSlot]!));
           const target = objects[step.object]!;
           if (!isPromise(value)) target[step.key] = value;
           else if (sync) asyncError(show(step.path), [value, ...pending]);
           else pending.push(value.then((v) => void (target[step.key] = v)));
         }
       }
-      if (pending.length > 0) return Promise.all(pending).then(() => this.runLevels(rows, traces, ctx, level + 1, sync));
+      if (pending.length > 0) return Promise.all(pending).then(() => this.runLevels(rows, traces, ctx, first, level + 1, sync));
     }
     return rows.map((objects) => objects[0] as T);
   }
@@ -379,7 +380,7 @@ function read(root: Record<string, unknown>, path: Path): unknown {
   return value;
 }
 
-/** The per-path RNG stream: the same fork chain the path always gets, so values do not depend on step order. */
+/** The field's context: the same fork chain the path always gets, so values do not depend on step order. */
 function contextFor(ctx: Context, path: Path): Context {
   let c = ctx;
   for (const key of path) c = c.child(key);
