@@ -89,6 +89,7 @@ export {
 } from "./schema";
 export { create, type CreateParams, type CreateResults } from "./create";
 export { dropTemps, type RecordOf } from "./output";
+export { mapRows, mapTree, type MapRowsParams, type MapTreeParams } from "./map";
 export { preview, previewSync, type PreviewParams, type PreviewResults } from "./preview";
 export { UniqueIdGen, type UniqueIdGenParams } from "./id";
 export { MersenneTwister, Sfc32, type Rng } from "./rng";

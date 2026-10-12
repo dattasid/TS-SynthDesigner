@@ -254,6 +254,41 @@ an earlier run (DataDesigner's seed dataset, e.g. for duplicates), `ctx.row.inde
 `.temp()` fields that other fields can read but that are dropped from the output (the output type
 drops them too).
 
+## Building on earlier runs
+
+A row never reads other rows of its own run: they may still be waiting on LLM calls. A finished
+run, though, is plain read-only data, and a later run can use it in two ways.
+
+**Map**: one new row per earlier row, in order, in the same shape or a new one. The earlier row is
+a field (here `.temp()`, so it is read but not output), so the other fields read it with typed refs:
+
+```ts
+const Summary = s.object({ bug: BugSource.temp(), oneLiner: s.string() });
+const r = rootRefs(Summary);
+const { records } = await mapRows({
+  schema: Summary,
+  as: "bug",            // row i gets bugs[i]
+  rows: bugs,
+  fields: { oneLiner: new LLMTextGen({ model: "fast", prompt: prompt`Summarize in one line: ${json(r.bug)}` }) },
+  seed, providers, models,
+});
+```
+
+**View**: any row looks at any earlier row. `SourceRowGen` picks one, in order, shuffled or at
+random; a `CustomGen` holding the rows can search them. This is how the
+[bug-triage](examples/bug-triage/README.md) duplicates are made:
+
+```ts
+const originals = await preview({ gen: bugGen, numRecords: 85, seed });
+const dupGen = bugGen.clone({ fields: {
+  dupSource: new SourceRowGen({ rows: originals.records, pick: "random" }),
+  duplicateOf: FunctionGen.bound({ inputs: { src: r.dupSource }, fn: ({ src }) => src!.id }),
+} });
+const dups = await preview({ gen: dupGen, numRecords: 10, seed, startIndex: originals.nextIndex });
+```
+
+`startIndex` gives each run its own row indices, so `UniqueIdGen` ids never collide across runs.
+
 ## Effortless deep references
 
 Let us create an `Address` schema which can be subtree of a `Person` schema.
