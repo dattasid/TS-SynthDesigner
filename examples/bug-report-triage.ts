@@ -32,6 +32,7 @@ import {
   SourceRowGen,
   SubCategorySamplerGen,
   TreeGen,
+  UniqueIdGen,
   type Infer,
   type LLMProvider,
   type ModelSpec,
@@ -116,7 +117,7 @@ export const BugReport = s.object({
   // the triage and ticket were written for. dup_no_id: a duplicate, so said by the triage, without
   // duplicateOf.
   pathology: s.enum(["none", "bad_priority", "dup_no_id"]),
-  id: s.string(), // BUG-10001, BUG-10002...: by row index, so the runs get distinct ids
+  id: s.string(), // BUG-7KQ2M: from the row index, so unique across the runs, and no clue to which run made it
   dupSource: DupSource.optional().temp(), // only in the duplicate runs
   duplicateOf: s.string().optional(), // the id of the bug this one duplicates
   area: s.enum(["checkout", "search", "auth", "notifications"]),
@@ -179,7 +180,7 @@ export const bugReportGen = new TreeGen({
   schema: BugReport,
   fields: {
     pathology: new CategorySamplerGen<BugReport["pathology"]>({ values: { none: 95, bad_priority: 5, dup_no_id: 0 } }), // dup_no_id: only in its own run (bugReports)
-    id: CustomGen.bound({ inputs: {}, fn: (_, ctx) => `BUG-${10001 + ctx.row.index}` }),
+    id: new UniqueIdGen({ prefix: "BUG-", length: 5 }),
     // Set by duplicateGen; read by the prompts, so present (and undefined) here.
     dupSource: new ConstantGen<DupSource | undefined>({ value: undefined }),
     duplicateOf: new ConstantGen<string | undefined>({ value: undefined }),

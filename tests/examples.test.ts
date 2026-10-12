@@ -320,21 +320,20 @@ it("bug-report triage: pre-decided specs, a typed LLM reply feeding another, an 
   // Three runs: 34 originals, 4 duplicates (10%) and 2 dup_no_id (5%), with ids from disjoint row ranges.
   expect(records).toHaveLength(40);
   expect(new Set(records.map((b) => b.id)).size).toBe(40);
-  expect(records.map((b) => b.id).sort()[0]).toBe("BUG-10001");
+  for (const b of records) expect(b.id).toMatch(/^BUG-[0-9A-Z]{5}$/);
   const byId = new Map(records.map((b) => [b.id, b]));
   const duplicates = records.filter((b) => b.duplicateOf !== undefined);
   expect(duplicates).toHaveLength(4);
   for (const d of duplicates) {
     const original = byId.get(d.duplicateOf!)!;
     expect(original.duplicateOf).toBeUndefined(); // duplicates of originals
-    expect(Number(d.id.slice(4))).toBeGreaterThan(Number(original.id.slice(4))); // filed later
     expect([d.area, d.severity]).toEqual([original.area, original.severity]);
     expect(d.ticketText).toContain(`Duplicate of: ${d.duplicateOf}`);
   }
   expect(records.filter((b) => b.pathology === "dup_no_id")).toHaveLength(2);
   expect(records.slice(-6).filter((b) => b.duplicateOf !== undefined || b.pathology === "dup_no_id").length).toBeLessThan(6); // shuffled
   const triages = mock.requests.filter((q) => q.prompt.startsWith("You triage"));
-  expect(triages.filter((q) => /must say it is a duplicate of BUG-\d+/.test(q.prompt))).toHaveLength(4);
+  expect(triages.filter((q) => /must say it is a duplicate of BUG-[0-9A-Z]{5}\./.test(q.prompt))).toHaveLength(4);
   expect(triages.filter((q) => q.prompt.includes("duplicate of an existing issue, without any ID"))).toHaveLength(2);
   expect(triages.filter((q) => q.prompt.includes("Do not call it a duplicate"))).toHaveLength(34);
   expect(mock.requests.filter((q) => q.prompt.startsWith("You are ") && q.prompt.includes("Someone else already reported"))).toHaveLength(6);
