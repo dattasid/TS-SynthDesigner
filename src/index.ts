@@ -90,6 +90,7 @@ export {
 export { create, type CreateParams, type CreateResults } from "./create";
 export { dropTemps, type RecordOf } from "./output";
 export { preview, previewSync, type PreviewParams, type PreviewResults } from "./preview";
+export { UniqueIdGen, type UniqueIdGenParams } from "./id";
 export { MersenneTwister, Sfc32, type Rng } from "./rng";
 export {
   CategorySamplerGen,
