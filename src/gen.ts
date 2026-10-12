@@ -206,8 +206,8 @@ export interface Gen<Out, Inputs = {}> {
    */
   readonly inputNames?: readonly string[];
   /**
-   * Produces one value. May return a Promise; if it does, draw all randomness from `ctx` before the
-   * first `await`, so the draws happen in row order (see Plan) and the data stays reproducible.
+   * Produces one value. May return a Promise. Draw randomness only from `ctx.rng`: the row's own
+   * stream for this field, so draws before and after an `await` are reproducible alike.
    */
   generate(inputs: Inputs, ctx: Context): MaybePromise<Out>;
   /**

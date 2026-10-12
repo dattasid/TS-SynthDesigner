@@ -134,7 +134,7 @@ class LLMStructuredCall<T> extends BaseGen<T, Record<string, unknown>> {
 
   generate(inputs: Record<string, unknown>, ctx: Context): Promise<T> {
     const { spec, provider } = ctx.model(this.model);
-    // Drawn now, before any await, so the seeds follow row order (see Plan). Attempt n uses seed + n.
+    // From the row's own stream of this field. Attempt n uses seed + n.
     const seed = spec.seed === false ? undefined : ctx.rng.nextUint32() >>> 1;
     const valueOf = (key: string) => inputs[this.inputOf.get(key)!];
     const prompt = this.prompt.render(valueOf) + this.guidance;

@@ -1,4 +1,4 @@
-export { Context, Global, type ContextParams, type ModelSpec, type RowInfo } from "./context";
+export { Context, Global, type ContextParams, type ItemInfo, type ModelSpec, type RowInfo } from "./context";
 export { ConfigError, GenerationError } from "./errors";
 export {
   ConstantGen,
@@ -90,6 +90,7 @@ export {
 export { create, type CreateParams, type CreateResults } from "./create";
 export { dropTemps, type RecordOf } from "./output";
 export { mapRows, mapTree, type MapRowsParams, type MapTreeParams } from "./map";
+export { ItemTree, ListGen, type ItemTreeParams, type ListCount, type ListGenBoundParams, type ListGenParams, type ItemGen } from "./list";
 export { preview, previewSync, type PreviewParams, type PreviewResults } from "./preview";
 export { UniqueIdGen, type UniqueIdGenParams } from "./id";
 export { MersenneTwister, Sfc32, type Rng } from "./rng";

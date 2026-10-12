@@ -100,7 +100,6 @@ export class ConditionalRejectionResamplerGen<V, Inputs = {}, E extends OnExhaus
       const candidate = this.childGen.generate({}, ctx);
       if (candidate instanceof Promise) {
         candidate.catch(() => {});
-        // Redrawing after an await would take this field's random draws out of row order.
         throw new GenerationError(`${this.describe()} at ${ctx.pathString}: childGen is async; that is not supported yet.`);
       }
       value = candidate;

@@ -76,6 +76,18 @@ export class Global {
 export interface RowInfo {
   /** Its index in the run: `global.startIndex` for the first row, then counting up. */
   readonly index: number;
+  /** Set while a `ListGen` makes one of its items: which one. */
+  readonly item?: ItemInfo;
+}
+
+/** The list item being made by a `ListGen`, in the row being generated. */
+export interface ItemInfo {
+  /** Its index in the list, from 0. */
+  readonly index: number;
+  /** How many items the list has. */
+  readonly count: number;
+  /** The list's inputs (the values of its bound refs): what the item tree's `as` field gets. */
+  readonly inputs: Readonly<Record<string, unknown>>;
 }
 
 /**
@@ -131,7 +143,7 @@ export class Context {
     let c = this.children.get(name);
     if (!c) {
       c = this.base
-        ? this.base.child(name).forRow(this.rowInfo!.index)
+        ? this.base.child(name).view(this.rowInfo!)
         : new Context(this.rng.fork(name), [...this.path, name], this.global, new Map());
       this.children.set(name, c);
     }
@@ -143,8 +155,22 @@ export class Context {
    * into `traceSink` if given. The plan makes one per row per field.
    */
   forRow(index: number, traceSink?: Trace): Context {
+    // A row view keeps its row info (e.g. the list item) for its own row.
+    return this.view(this.rowInfo?.index === index ? this.rowInfo : { index }, traceSink);
+  }
+
+  /**
+   * This context's view for list item `item` of the current row (row 0 outside a run). The stream is
+   * the row's stream of this context's path, so call it on a context of its own per item, e.g.
+   * `ctx.child(String(i))`. Every context below it sees `ctx.item`.
+   */
+  forItem(item: ItemInfo): Context {
+    return this.view({ index: this.rowInfo?.index ?? 0, item });
+  }
+
+  private view(rowInfo: RowInfo, traceSink?: Trace): Context {
     const base = this.base ?? this;
-    return new Context(Sfc32.forRow(base.rng.key, index), base.path, base.global, new Map(), traceSink, { index }, base);
+    return new Context(Sfc32.forRow(base.rng.key, rowInfo.index), base.path, base.global, new Map(), traceSink, rowInfo, base);
   }
 
   /** The row being generated. A ConfigError outside a run (e.g. a Gen called on `Context.create()`). */
@@ -156,6 +182,18 @@ export class Context {
   /** Whether this is a row's view, so `row` is set. */
   get hasRow(): boolean {
     return this.rowInfo !== undefined;
+  }
+
+  /** The list item being made (see `ListGen`). A ConfigError outside one. */
+  get item(): ItemInfo {
+    const item = this.rowInfo?.item;
+    if (!item) throw new ConfigError(`field '${this.pathString}': ctx.item is only set while a ListGen makes an item.`);
+    return item;
+  }
+
+  /** Whether a `ListGen` is making an item, so `item` is set. */
+  get hasItem(): boolean {
+    return this.rowInfo?.item !== undefined;
   }
 
   /**

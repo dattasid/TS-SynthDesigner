@@ -56,6 +56,7 @@ export class UniqueIdGen extends BaseGen<string> {
   }
 
   generate(_inputs: {}, ctx: Context): string {
+    this.check(!ctx.hasItem, `at ${ctx.pathString}: the items of a list share their row's index, so they would all get the same id.`);
     const index = ctx.row.index;
     this.check(index < this.size, `row ${index} is past the last id: ${this.alphabet.length} ** ${this.length} = ${this.size} ids. Use a larger length.`);
     let n = this.permute(index, this.key === undefined ? ctx.global.seed : [this.key >>> 0]);

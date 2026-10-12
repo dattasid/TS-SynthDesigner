@@ -82,7 +82,7 @@ class LLMTextCall extends BaseGen<string, Record<string, unknown>> {
 
   generate(inputs: Record<string, unknown>, ctx: Context): Promise<string> {
     const { spec, provider } = ctx.model(this.model);
-    // Drawn now, before any await, so the seeds follow row order (see Plan).
+    // From the row's own stream of this field.
     const seed = spec.seed === false ? undefined : ctx.rng.nextUint32() >>> 1;
     const valueOf = (key: string) => inputs[this.inputOf.get(key)!];
     const request = {

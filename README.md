@@ -17,6 +17,8 @@ tutorials (see [Examples](#examples)). This is an independent project, not affil
   exactly what was wrong.
 - **Dependencies as a DAG.** Fields can read siblings, their parent or the root of the record. The
   generation order comes from those reads, and cycles are reported up front.
+- **Lists of generated objects.** A list field can hold items made by any generator, including a
+  whole tree per item, with its own sampled values and LLM calls.
 - **Constrained and custom fields.** Rejection sampling with conditions on other fields, plus plain
   functions as generators, typed from their inputs.
 - **Prompt building.** Tagged-template prompts whose holes are typed refs, conditional sections
@@ -254,6 +256,35 @@ an earlier run (DataDesigner's seed dataset, e.g. for duplicates), `ctx.row.inde
 `.temp()` fields that other fields can read but that are dropped from the output (the output type
 drops them too).
 
+## Lists of generated items
+
+A list field whose items are each made by a generator: tags from a sampler, or a whole tree per
+item. An item tree gets the list's inputs in one field (`as`), and reads them with typed refs:
+
+```ts
+const Landmark = s.object({
+  zone: s.object({ name: s.string(), biome: s.string() }).temp(),   // the list's inputs
+  kind: s.enum(["ruin", "shrine", "tower"]),
+  description: s.string(),
+});
+const l = refs(Landmark);
+const landmark = ListGen.itemTree({
+  schema: Landmark,
+  as: "zone",
+  fields: {
+    kind: new CategorySamplerGen({ values: ["ruin", "shrine", "tower"] }),
+    description: new LLMTextGen({ model: "writer", prompt: prompt`A ${l.kind} in ${l.zone.name}, a ${l.zone.biome}.` }),
+  },
+});
+
+// In the Zone tree:
+landmarks: ListGen.bound({ item: landmark, count: { min: 2, max: 4 }, inputs: { name: z.name, biome: z.biome } }),
+```
+
+`count` is a number, a `{ min, max }` range, or any number generator. Each item has its own seeded
+stream, so item 0 is the same whether the list has 2 items or 4. The items' LLM calls run in
+parallel, and lists can nest. `ctx.item` gives the item's index and the list's length.
+
 ## Building on earlier runs
 
 A row never reads other rows of its own run: they may still be waiting on LLM calls. A finished
@@ -390,7 +421,6 @@ npm test        # tsc, then vitest
 ## Roadmap
 
 1. Consolidated builder, more convenient, fewer type checks.
-2. Array fields backed by any type of generator.
 
 ## License
 
