@@ -2,14 +2,15 @@
 // cross-field constraint, a reporter that shapes the prompt but is dropped, a typed LLM report that
 // feeds a typed LLM triage, and an incident note only for the worst bugs. Some bugs duplicate earlier
 // ones: made in later runs that read the first run's records. A few records are corrupted on purpose
-// (`pathology`), as test data for a checker. Runs on OpenRouter into scratch/bug-report-triage.jsonl:
-//   npx tsx examples/bug-report-triage.ts [numRecords]
+// (`pathology`), as test data for a checker. See README.md here. Runs on OpenRouter, into
+// scratch/bug-report-triage.jsonl unless a path is given:
+//   npx tsx examples/bug-triage/bug-report-triage.ts [numRecords] [path]
 // Needs an OpenRouter key in the env var OPENROUTER_API_KEY or in a file of that name.
 // Imported (by the tests), it only defines the generator.
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { FakerGen } from "../src/faker";
+import { FakerGen } from "../../src/faker";
 import {
   CategorySamplerGen,
   ConditionalRejectionResamplerGen,
@@ -37,7 +38,7 @@ import {
   type LLMProvider,
   type ModelSpec,
   type Output,
-} from "../src/index";
+} from "../../src/index";
 
 const s = SchemaBuilder;
 
@@ -417,7 +418,7 @@ export async function bugReports({ numRecords, seed, providers, models }: BugRep
 // Run only when executed directly, not when imported.
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const numRecords = Number(process.argv[2] ?? 20);
-  const path = "scratch/bug-report-triage.jsonl";
+  const path = process.argv[3] ?? "scratch/bug-report-triage.jsonl";
   const records = await bugReports({ numRecords, seed: 2026, providers, models });
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, records.map((x) => JSON.stringify(x) + "\n").join(""));

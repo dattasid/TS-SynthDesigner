@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, expectTypeOf, it } from "vitest";
 import { productReviewGen } from "../examples/product-reviews";
-import { bugReports } from "../examples/bug-report-triage";
+import { bugReports } from "../examples/bug-triage/bug-report-triage";
 import { structuredReviewGen } from "../examples/structured-reviews";
 import { FakerGen } from "../src/faker";
 import {
@@ -285,7 +285,7 @@ it("DataDesigner's tutorial 2: structured replies, expressions, skipped fields (
   console.log(records[0]);
 });
 
-it("bug-report triage: pre-decided specs, a typed LLM reply feeding another, an incident note for the worst, duplicates from a second run (examples/bug-report-triage.ts)", async () => {
+it("bug-report triage: pre-decided specs, a typed LLM reply feeding another, an incident note for the worst, duplicates from a second run (examples/bug-triage/bug-report-triage.ts)", async () => {
   const mock = new MockProvider({
     respond: ({ prompt }) =>
       prompt.startsWith("You are ")

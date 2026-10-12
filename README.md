@@ -23,6 +23,10 @@ tutorials (see [Examples](#examples)). This is an independent project, not affil
   (`match`), JSON for nested values, and only the rows that need an LLM call make one.
 - **Reproducible.** One seed gives the same data, at any batch size. Each row depends only on the seed and its index, so any range of rows can be made again on its own (`startIndex`).
 
+Here is a dataset generated with these complex features: [**bug-report triage**](examples/bug-triage/README.md),
+100 synthetic bug reports with chained typed LLM calls, duplicates of earlier bugs, and planted defects
+labelled for a checker.
+
 ## Quick look
 
 A person with three fields: `city` depends on `country`.
@@ -310,6 +314,10 @@ is a compile error, and so is a `home` generator that does not make an `Address`
 that reads with `rootRefs` (absolute) where it does not fit is caught before the run starts.
 
 ## Examples
+
+- [`examples/bug-triage/`](examples/bug-triage/README.md): a dataset generated with these complex
+  features: synthetic bug reports, their triage and tickets, duplicates made from earlier records,
+  and deliberately corrupted records labelled for a checker. The 100-row dataset is committed.
 
 Two of NVIDIA Data Designer's tutorials, ported field for field:
 
