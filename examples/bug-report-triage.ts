@@ -1,34 +1,40 @@
 // Bug-report triage: synthetic issue tracker data, one record per bug. A nested environment with a
 // cross-field constraint, a reporter that shapes the prompt but is dropped, a typed LLM report that
-// feeds a typed LLM triage, and an incident note only for the worst bugs. A few records are corrupted
-// on purpose (`pathology`), as test data for a checker. Runs on OpenRouter into
-// scratch/bug-report-triage.jsonl:
+// feeds a typed LLM triage, and an incident note only for the worst bugs. Some bugs duplicate earlier
+// ones: made in later runs that read the first run's records. A few records are corrupted on purpose
+// (`pathology`), as test data for a checker. Runs on OpenRouter into scratch/bug-report-triage.jsonl:
 //   npx tsx examples/bug-report-triage.ts [numRecords]
 // Needs an OpenRouter key in the env var OPENROUTER_API_KEY or in a file of that name.
 // Imported (by the tests), it only defines the generator.
-import { existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { FakerGen } from "../src/faker";
 import {
   CategorySamplerGen,
   ConditionalRejectionResamplerGen,
-  create,
+  ConstantGen,
   CustomGen,
+  FunctionGen,
   json,
   LLMStructuredGen,
   LLMTextGen,
   match,
   MatchGen,
+  preview,
   prompt,
   Provider,
   reasoningOf,
   refs,
   rootRefs,
   SchemaBuilder,
+  Sfc32,
+  SourceRowGen,
   SubCategorySamplerGen,
   TreeGen,
   type Infer,
+  type LLMProvider,
+  type ModelSpec,
   type Output,
 } from "../src/index";
 
@@ -74,12 +80,21 @@ export const Report = s.object({
   reproCode: s.string({ description: "a minimal code snippet that reproduces the bug, only when asked for" }).optional(),
 }, { name: "report" });
 
-// The priority is decided before the triage call (see IssueSpecTemp); the LLM explains it.
+// The priority and whether it is a duplicate are decided before the triage call; the LLM explains them.
 export const Triage = s.object({
   component: s.enum(["frontend", "backend", "payments", "identity", "mobile", "infrastructure"]),
-  duplicateLikely: s.boolean({ description: "whether this sounds like a commonly reported bug" }),
   rationale: s.string({ description: "one or two sentences on the component and the given priority" }),
 }, { name: "triage" });
+
+// The earlier bug a duplicate repeats: a few fields of a record of the first run.
+export const DupSource = s.object({
+  id: s.string(),
+  area: s.enum(["checkout", "search", "auth", "notifications"]),
+  severity: s.enum(["low", "medium", "high", "critical"]),
+  title: s.string(),
+  actual: s.string(),
+}, { name: "dupSource" });
+export type DupSource = Infer<typeof DupSource>;
 
 // Pre-decide a few things, dont let LLM decide
 export const IssueSpecTemp = s.object({
@@ -98,8 +113,12 @@ const priorityGap = (severity: BugReport["severity"], priority: IssueSpec["prior
 
 export const BugReport = s.object({
   // A deliberate defect, the label for a checker. bad_priority: the stored priority is not the one
-  // the triage and ticket were written for.
-  pathology: s.enum(["none", "bad_priority"]),
+  // the triage and ticket were written for. dup_no_id: a duplicate, so said by the triage, without
+  // duplicateOf.
+  pathology: s.enum(["none", "bad_priority", "dup_no_id"]),
+  id: s.string(), // BUG-10001, BUG-10002...: by row index, so the runs get distinct ids
+  dupSource: DupSource.optional().temp(), // only in the duplicate runs
+  duplicateOf: s.string().optional(), // the id of the bug this one duplicates
   area: s.enum(["checkout", "search", "auth", "notifications"]),
   severity: s.enum(["low", "medium", "high", "critical"]),
   environment: Environment,
@@ -159,7 +178,11 @@ export const bugReportGen = new TreeGen({
   id: "bug",
   schema: BugReport,
   fields: {
-    pathology: new CategorySamplerGen<BugReport["pathology"]>({ values: { none: 95, bad_priority: 5 } }),
+    pathology: new CategorySamplerGen<BugReport["pathology"]>({ values: { none: 95, bad_priority: 5, dup_no_id: 0 } }), // dup_no_id: only in its own run (bugReports)
+    id: CustomGen.bound({ inputs: {}, fn: (_, ctx) => `BUG-${10001 + ctx.row.index}` }),
+    // Set by duplicateGen; read by the prompts, so present (and undefined) here.
+    dupSource: new ConstantGen<DupSource | undefined>({ value: undefined }),
+    duplicateOf: new ConstantGen<string | undefined>({ value: undefined }),
     area: new CategorySamplerGen<BugReport["area"]>({ values: { checkout: 2, search: 3, auth: 2, notifications: 1 } }),
     // Mostly minor bugs: the first value is the most likely.
     severity: new CategorySamplerGen<BugReport["severity"]>({ values: ["low", "medium", "high", "critical"], skew: "zipf" }),
@@ -233,7 +256,15 @@ export const bugReportGen = new TreeGen({
       prompt: prompt`You are ${r.reporter.name}, filing a bug report about the ${r.area} feature of a shopping app. Your tech skills: ${r.reporter.techSavvy}. The bug's severity is ${r.severity}. Your setup:
 ${json(r.environment)}
 
-`.match({
+${match({
+  inputs: { dup: r.dupSource },
+  cases: [{
+    when: ({ dup }) => dup !== undefined,
+    then: prompt`Someone else already reported this bug as "${r.dupSource.title}" (what happened: ${r.dupSource.actual}). You hit the same bug: describe it in your own words, from your own setup; do not copy their wording.
+
+`,
+  }],
+})}`.match({
         inputs: { detail: r.issueSpec.detail },
         cases: [
           {
@@ -277,7 +308,23 @@ ${match({
   }],
   otherwise: `Do not name the priority level (P0 to P3) in the rationale.
 `,
-})}Pick the component, say whether it is likely a duplicate, and explain the component and the priority in the rationale.`,
+})}${match({
+  inputs: { dup: r.dupSource, of: r.duplicateOf },
+  cases: [
+    {
+      when: ({ dup, of }) => dup !== undefined && of !== undefined,
+      then: prompt`This bug duplicates ${r.duplicateOf} ("${r.dupSource.title}"). The rationale must say it is a duplicate of ${r.duplicateOf}.
+`,
+    },
+    {
+      when: ({ dup }) => dup !== undefined,
+      then: prompt`This bug duplicates an earlier report ("${r.dupSource.title}"), whose ID you do not have. The rationale must say it is a duplicate of an existing issue, without any ID.
+`,
+    },
+  ],
+  otherwise: `Do not call it a duplicate.
+`,
+})}Pick the component, and explain the component and the priority in the rationale.`,
     }),
     triageReasoning: reasoningOf(r.triage),
 
@@ -296,8 +343,13 @@ ${json(r.report)}`,
 
     ticketText: new LLMTextGen({
       model: "writer",
-      prompt: prompt`Render this bug as a ticket in Markdown: title, priority, component, environment, steps, expected and actual, and the repro code if there is any.
-Priority: ${r.issueSpec.priority}
+      prompt: prompt`Render this bug as a ticket in Markdown: ID, title, priority, component, environment, steps, expected and actual, and the repro code if there is any.
+ID: ${r.id}
+Priority: ${r.issueSpec.priority}${match({
+  inputs: { of: r.duplicateOf },
+  cases: [{ when: ({ of }) => of !== undefined, then: prompt`
+Duplicate of: ${r.duplicateOf}` }],
+})}
 Report:
 ${json(r.report)}
 Triage:
@@ -314,10 +366,59 @@ ${r.incidentNote}
   },
 });
 
+/**
+ * The duplicates of a set of bugs: each repeats one of `originals` (drawn at random, so a popular bug
+ * may come up twice), in its area and severity, with its own reporter, words and triage.
+ * `withId: false` leaves out duplicateOf: the dup_no_id pathology.
+ */
+export function duplicateGen(originals: readonly BugReportRecord[], { withId = true } = {}) {
+  const sources = originals.map(({ id, area, severity, report }): DupSource => ({ id, area, severity, title: report.title, actual: report.actual }));
+  return bugReportGen.clone({
+    id: withId ? "duplicate" : "duplicate without id",
+    fields: {
+      pathology: new ConstantGen<BugReport["pathology"]>({ value: withId ? "none" : "dup_no_id" }),
+      dupSource: new SourceRowGen({ rows: sources, pick: "random" }),
+      ...(withId && { duplicateOf: FunctionGen.bound({ inputs: { source: r.dupSource }, fn: ({ source }) => source!.id }) }),
+      area: FunctionGen.bound({ inputs: { source: r.dupSource }, fn: ({ source }) => source!.area }),
+      severity: FunctionGen.bound({ inputs: { source: r.dupSource }, fn: ({ source }) => source!.severity }),
+    },
+  });
+}
+
+export interface BugReportsParams {
+  numRecords: number;
+  seed: number;
+  providers: Readonly<Record<string, LLMProvider>>;
+  models: Readonly<Record<string, ModelSpec>>;
+}
+
+/**
+ * The whole dataset, in three runs over one seed, each its own range of row indices (so of ids): the
+ * originals, 10% duplicates of them, and 5% dup_no_id. Then shuffled, so the position does not give
+ * the kind away. Exact counts, unlike a sampled pathology.
+ */
+export async function bugReports({ numRecords, seed, providers, models }: BugReportsParams): Promise<BugReportRecord[]> {
+  const numDuplicates = Math.round(numRecords * 0.1);
+  const numNoId = Math.round(numRecords * 0.05);
+  const llm = { seed, providers, models };
+  const originals = await preview({ gen: bugReportGen, numRecords: numRecords - numDuplicates - numNoId, ...llm });
+  const duplicates = await preview({ gen: duplicateGen(originals.records), numRecords: numDuplicates, startIndex: originals.nextIndex, ...llm });
+  const noId = await preview({ gen: duplicateGen(originals.records, { withId: false }), numRecords: numNoId, startIndex: duplicates.nextIndex, ...llm });
+  const records = [...originals.records, ...duplicates.records, ...noId.records];
+  const rng = new Sfc32([seed]).fork("order"); // Fisher-Yates
+  for (let i = records.length - 1; i > 0; i--) {
+    const j = rng.int(0, i);
+    [records[i], records[j]] = [records[j]!, records[i]!];
+  }
+  return records;
+}
+
 // Run only when executed directly, not when imported.
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  const numRecords = Number(process.argv[2] ?? 10);
+  const numRecords = Number(process.argv[2] ?? 20);
   const path = "scratch/bug-report-triage.jsonl";
-  const { seed } = await create({ gen: bugReportGen, numRecords, path, overwrite: true, seed: 2026, providers, models });
-  console.log(`${numRecords} records in ${path} (seed ${seed.join(",")})`);
+  const records = await bugReports({ numRecords, seed: 2026, providers, models });
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, records.map((x) => JSON.stringify(x) + "\n").join(""));
+  console.log(`${records.length} records in ${path} (seed 2026)`);
 }

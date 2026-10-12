@@ -244,8 +244,10 @@ const employee = new TreeGen({
 ```
 
 Also: `FunctionGen` for `field2 = f(field1)`, `ConstantGen` for a value shared by every row,
-`FakerGen` for names, emails and addresses (faker-js, optional), and `.temp()` fields that other
-fields can read but that are dropped from the output (the output type drops them too).
+`FakerGen` for names, emails and addresses (faker-js, optional), `SourceRowGen` for the rows of
+an earlier run (DataDesigner's seed dataset, e.g. for duplicates), `ctx.row.index` for ids, and
+`.temp()` fields that other fields can read but that are dropped from the output (the output type
+drops them too).
 
 ## Effortless deep references
 

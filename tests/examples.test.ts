@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, expectTypeOf, it } from "vitest";
 import { productReviewGen } from "../examples/product-reviews";
-import { bugReportGen } from "../examples/bug-report-triage";
+import { bugReports } from "../examples/bug-report-triage";
 import { structuredReviewGen } from "../examples/structured-reviews";
 import { FakerGen } from "../src/faker";
 import {
@@ -285,7 +285,7 @@ it("DataDesigner's tutorial 2: structured replies, expressions, skipped fields (
   console.log(records[0]);
 });
 
-it("bug-report triage: pre-decided specs, a typed LLM reply feeding another, an incident note for the worst (examples/bug-report-triage.ts)", async () => {
+it("bug-report triage: pre-decided specs, a typed LLM reply feeding another, an incident note for the worst, duplicates from a second run (examples/bug-report-triage.ts)", async () => {
   const mock = new MockProvider({
     respond: ({ prompt }) =>
       prompt.startsWith("You are ")
@@ -297,16 +297,11 @@ it("bug-report triage: pre-decided specs, a typed LLM reply feeding another, an 
             reproCode: prompt.includes("in reproCode.") ? "await cart.pay()" : null,
           })
         : prompt.startsWith("You triage bugs")
-          ? JSON.stringify({ component: "payments", duplicateLikely: false, rationale: "Blocks checkout." })
+          ? JSON.stringify({ component: "payments", rationale: "Blocks checkout." })
           : `echo: ${prompt}`,
   });
-  const { records } = await preview({
-    gen: bugReportGen,
-    numRecords: 30,
-    seed: 1,
-    providers: { mock },
-    models: { writer: { provider: "mock", model: "echo" } },
-  });
+  const params = { numRecords: 40, seed: 1, providers: { mock }, models: { writer: { provider: "mock", model: "echo" } } };
+  const records = await bugReports(params);
   for (const b of records) {
     expect("reporter" in b || "issueSpec" in b).toBe(false); // .temp(): shape the prompts, then dropped
     const { platform, os, browser } = b.environment;
@@ -315,12 +310,34 @@ it("bug-report triage: pre-decided specs, a typed LLM reply feeding another, an 
     expect(b.environment.appVersion).toMatch(/^4\.\d+\.\d$/);
     // The ticket has the priority the prompts used; bad_priority stores another one.
     const truePriority = b.ticketText.match(/Priority: (P\d)/)![1] as typeof b.priority;
-    expect(truePriority === b.priority).toBe(b.pathology === "none");
+    expect(truePriority === b.priority).toBe(b.pathology !== "bad_priority");
     const worst = b.severity === "critical" || truePriority === "P0"; // the priority was decided, not the LLM
     expect(b.incidentNote !== undefined).toBe(worst);
     expect(b.ticketText.includes('"Incident" section')).toBe(worst);
   }
   expect(records.some((b) => b.pathology === "bad_priority")).toBe(true);
+
+  // Three runs: 34 originals, 4 duplicates (10%) and 2 dup_no_id (5%), with ids from disjoint row ranges.
+  expect(records).toHaveLength(40);
+  expect(new Set(records.map((b) => b.id)).size).toBe(40);
+  expect(records.map((b) => b.id).sort()[0]).toBe("BUG-10001");
+  const byId = new Map(records.map((b) => [b.id, b]));
+  const duplicates = records.filter((b) => b.duplicateOf !== undefined);
+  expect(duplicates).toHaveLength(4);
+  for (const d of duplicates) {
+    const original = byId.get(d.duplicateOf!)!;
+    expect(original.duplicateOf).toBeUndefined(); // duplicates of originals
+    expect(Number(d.id.slice(4))).toBeGreaterThan(Number(original.id.slice(4))); // filed later
+    expect([d.area, d.severity]).toEqual([original.area, original.severity]);
+    expect(d.ticketText).toContain(`Duplicate of: ${d.duplicateOf}`);
+  }
+  expect(records.filter((b) => b.pathology === "dup_no_id")).toHaveLength(2);
+  expect(records.slice(-6).filter((b) => b.duplicateOf !== undefined || b.pathology === "dup_no_id").length).toBeLessThan(6); // shuffled
+  const triages = mock.requests.filter((q) => q.prompt.startsWith("You triage"));
+  expect(triages.filter((q) => /must say it is a duplicate of BUG-\d+/.test(q.prompt))).toHaveLength(4);
+  expect(triages.filter((q) => q.prompt.includes("duplicate of an existing issue, without any ID"))).toHaveLength(2);
+  expect(triages.filter((q) => q.prompt.includes("Do not call it a duplicate"))).toHaveLength(34);
+  expect(mock.requests.filter((q) => q.prompt.startsWith("You are ") && q.prompt.includes("Someone else already reported"))).toHaveLength(6);
   // The triage names the priority in about a quarter of rows, and always for bad_priority.
   const triagePrompts = mock.requests.filter((q) => q.prompt.startsWith("You triage"));
   const named = triagePrompts.filter((q) => q.prompt.includes("must name the priority")).length;
@@ -341,6 +358,8 @@ it("bug-report triage: pre-decided specs, a typed LLM reply feeding another, an 
   // Only power users are asked for repro code.
   expect(reportPrompts.some((q) => q.prompt.includes("skills: novice") && q.prompt.includes("in reproCode."))).toBe(false);
   expect(records.some((b) => b.report.reproCode !== undefined)).toBe(true);
+
+  expect(await bugReports(params)).toEqual(records); // the same seed, the same dataset
 });
 
 it("conditional fields: MatchGen (DataDesigner's conditional params and skipped columns)", async () => {
