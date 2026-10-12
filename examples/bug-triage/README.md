@@ -10,7 +10,9 @@ Every record comes from the generator in [`bug-report-triage.ts`](bug-report-tri
 
 ## One bug and its duplicate
 
-Two runs, two reporters, two platforms, the same bug:
+The problem with randomly generating duplicate bugs, in a framework like this is - a row is not allowed to look at rows generated earlier in the same run. This is because when a field of row2 is being generated, row1 might not have finished generating and might be waiting on LLM calls.
+
+We solve this by generating no duplicate bugs in one run, then generating duplicates only on another run. Our framework allows looking at another finished run as shared readonly data.
 
 | | BUG-KXBMK (original) | BUG-4AMUX (`duplicateOf: "BUG-KXBMK"`) |
 |---|---|---|

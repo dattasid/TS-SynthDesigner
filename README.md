@@ -23,6 +23,7 @@ tutorials (see [Examples](#examples)). This is an independent project, not affil
   (`match`), JSON for nested values, and only the rows that need an LLM call make one.
 - **Reproducible.** One seed gives the same data, at any batch size. Each row depends only on the seed and its index, so any range of rows can be made again on its own (`startIndex`).
 
+## Showcase: Bug-triage with planted errors
 Here is a dataset generated with these complex features: [**bug-report triage**](examples/bug-triage/README.md),
 100 synthetic bug reports with chained typed LLM calls, duplicates of earlier bugs, and planted defects
 labelled for a checker.
