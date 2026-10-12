@@ -8,9 +8,13 @@ wrong. That makes the file useful test data for a checker, a dedup model, or an 
 Every record comes from the generator in [`bug-report-triage.ts`](bug-report-triage.ts): about
 400 lines, with every field typed.
 
+The delibreate errors we introduce are:
+1. Wrong priority: The triage will mention setting a certain priority but the bug will be set to something different.
+2. Missing duplicate ID: The triage will mention this is a duplicate, but the duplicate id field is not set.
+
 ## One bug and its duplicate
 
-The problem with randomly generating duplicate bugs, in a framework like this is - a row is not allowed to look at rows generated earlier in the same run. This is because when a field of row2 is being generated, row1 might not have finished generating and might be waiting on LLM calls.
+The problem with randomly generating duplicate bugs, in a framework like this is - a row is not allowed to look at other rows being generated in the same run. This is because when a field of row2 is being generated, row1 might not have finished generating everything and might be waiting on LLM calls.
 
 We solve this by generating no duplicate bugs in one run, then generating duplicates only on another run. Our framework allows looking at another finished run as shared readonly data.
 
@@ -26,7 +30,7 @@ We solve this by generating no duplicate bugs in one run, then generating duplic
 
 ```ts
 {
-  pathology: "none" | "bad_priority" | "dup_no_id", // the label: what is wrong on purpose
+  pathology: "none" | "bad_priority" | "dup_no_id", // the injected pathology
   id: "BUG-4AMUX",
   duplicateOf?: "BUG-KXBMK",
   area, severity, priority,
@@ -41,7 +45,7 @@ We solve this by generating no duplicate bugs in one run, then generating duplic
 ## The dataset
 
 `npx tsx examples/bug-triage/bug-report-triage.ts 100 examples/bug-triage/bug-triage-100.jsonl`,
-seed 2026, model `openai/gpt-6-luna` on OpenRouter. The run took 2 min 15 s.
+seed 2026, model `openai/gpt-6-luna`.
 
 | | |
 |---|---|
@@ -64,10 +68,11 @@ and which are corrupted. The LLM's text can differ from run to run.
 
 ## How it is built
 
-### The LLM explains decisions; it does not make them
+### The LLM does not sample or make random choices
 
-Anything a checker will test is drawn before the LLM is called, so the record's labels are true by
-construction. The priority comes from the severity (mostly in line, sometimes not, with a reason):
+LLMs are known for being biased samplers. They will pick options more common in their training data, dragging the entire generated dataset towards the mode.
+This is why we decide the actual properties of what to randomly generate in code. Then we ask the LLM to add flavor text, or to make choices that are not as important.
+For example: we pick the bug priority level in code. Then we ask the LLM to generate text that reflects this decision.
 
 ```ts
 priority: new SubCategorySamplerGen({
@@ -79,8 +84,6 @@ priority: new SubCategorySamplerGen({
 }).bind({ category: r.severity }),
 ```
 
-The triage prompt then states it, and adds instructions only where they apply:
-
 ```ts
 prompt`... The priority has been set to ${r.issueSpec.priority} (P0: drop everything, P3: someday).
 ${match({
@@ -90,9 +93,17 @@ ${match({
 })}`
 ```
 
+Two triage rationales from the dataset. The code chose the severity and the priority, and for the
+second one, a reason for the mismatch; the LLM wrote the words:
+
+| | decided in code | the LLM's rationale |
+|---|---|---|
+| BUG-RSH0Z | low severity, P3 | "This is a frontend checkout display issue: the order total sometimes fails to refresh after the quantity changes. Moving to P3 is appropriate because the issue is intermittent, low severity, and can be worked around by refreshing the page." |
+| BUG-77NUD | low severity, P0, because "a key enterprise customer reported it" | "The report concerns the checkout experience in Chrome on web, so frontend is the best-fit component. Moving to P0 despite the reported low severity because a key enterprise customer raised it; …" |
+
 ### Typed LLM calls feeding each other
 
-`report` is a typed reply (`LLMStructuredGen` with a schema). The triage prompt reads it with
+The bug `report` is a typed LLM reply (`LLMStructuredGen` with a schema). The triage prompt reads it with
 `json(r.report)`, and its own reply is typed too: `component` can only be one of six values, which
 is checked on every reply. An invalid reply is retried, and the model is shown what was wrong. The
 ticket prompt reads both. The plan runs the calls in dependency order, with the calls of one level
@@ -114,7 +125,7 @@ browser: ConditionalRejectionResamplerGen.bound({
 ### Fields that shape the prompts, then disappear
 
 The reporter (name, tech skills) and the issue spec (priority, detail level, whether to name the
-priority) are `.temp()`. They are generated and read by the prompts, then dropped from the records,
+priority) are `.temp()`. They are generated and read by the prompts, then dropped from the final records,
 and from the record type, `Output<typeof BugReport>`. Novices write vaguely; only power users are
 asked for repro code.
 
@@ -138,6 +149,8 @@ The dup_no_id run is the same clone without `duplicateOf`: the triage says "dupl
 record does not say of what.
 
 ### Ids that give nothing away
+
+The way we generate, all duplicate bug rows are next to each other. We can shuffle, but then bugs are not in order, and duplicates might seemingly refer to bugs filed later. The solution was the hash the bug ids, so each id remains unique but they look like UUIDs.
 
 ```ts
 id: new UniqueIdGen({ prefix: "BUG-", length: 5 }),
@@ -163,3 +176,14 @@ npx tsx examples/bug-triage/bug-report-triage.ts 100 my-bugs.jsonl
 
 It needs an OpenRouter key in the `OPENROUTER_API_KEY` environment variable or in a file of that name
 in the repo root. `npm test` runs the whole pipeline against a mock model, with no key needed.
+To use another provider, change `providers` and `models` at the top of
+[`bug-report-triage.ts`](bug-report-triage.ts). There are presets for OpenAI, Anthropic, NVIDIA
+(build.nvidia.com or a self-hosted NIM), OpenRouter, and a local Ollama:
+
+```ts
+const providers = { anthropic: Provider.anthropic() };  // key from ANTHROPIC_API_KEY
+const models = { writer: { provider: "anthropic", model: "claude-sonnet-5-5", temperature: 1, maxTokens: 2048 } };
+```
+
+`Provider.openai()` reads `OPENAI_API_KEY` and `Provider.nvidia()` reads `NVIDIA_API_KEY`. The
+fields name only the nickname `writer`, so nothing else changes.
