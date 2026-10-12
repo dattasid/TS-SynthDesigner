@@ -326,7 +326,7 @@ ${match({
   ],
   otherwise: `Do not call it a duplicate.
 `,
-})}Pick the component, and explain the component and the priority in the rationale.`,
+})}Pick the component, and explain the component and the priority in the rationale. The rationale must support the given priority: do not question it or suggest another.`,
     }),
     triageReasoning: reasoningOf(r.triage),
 

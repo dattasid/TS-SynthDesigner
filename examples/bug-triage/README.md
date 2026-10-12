@@ -8,7 +8,7 @@ wrong. That makes the file useful test data for a checker, a dedup model, or an 
 Every record comes from the generator in [`bug-report-triage.ts`](bug-report-triage.ts): about
 400 lines, with every field typed.
 
-The delibreate errors we introduce are:
+The deliberate errors we introduce are:
 1. Wrong priority: The triage will mention setting a certain priority but the bug will be set to something different.
 2. Missing duplicate ID: The triage will mention this is a duplicate, but the duplicate id field is not set.
 
@@ -22,9 +22,9 @@ We solve this by generating no duplicate bugs in one run, then generating duplic
 |---|---|---|
 | area, severity | auth, medium | auth, medium (copied from the original) |
 | environment | Android 13, native app 4.5.9 | iOS 17, native app 4.7.2 |
-| title | Sign-in does not work in the shopping app | Unable to sign in to my account on iOS |
-| actual | The sign-in does not complete, so I cannot access my account. | Sign-in does not finish, and I cannot access my account. |
-| triage | identity: "This issue concerns signing in and accessing an account, so it belongs to identity…" | identity: "This is a duplicate of BUG-KXBMK, which reports sign-in not working in the shopping app; …" |
+| title | Unable to sign in to the shopping app | Sign-in fails in the iOS shopping app |
+| actual | The app does not sign me in. | Sign-in does not complete, so I can't access my account. |
+| triage | identity: "This concerns authentication: the app fails to sign the user in after they submit account details…" | identity: "This is a duplicate of BUG-KXBMK, which reports being unable to sign in; …" |
 
 ## What is in a record
 
@@ -54,7 +54,7 @@ seed 2026, model `openai/gpt-6-luna`.
 | area | search 39, checkout 26, auth 20, notifications 15 |
 | severity | low 41, medium 30, high 18, critical 11 |
 | platform | web 42, ios 34, android 24 |
-| triage component (LLM's choice) | mobile 40, frontend 26, identity 18, backend 15, payments 1 |
+| triage component (LLM's choice) | mobile 38, backend 22, frontend 20, identity 18, payments 2 |
 | incident notes | 20 (every critical or P0 bug) |
 
 Checked on this file:
@@ -62,6 +62,7 @@ Checked on this file:
 - All 5 dup_no_id rows say "duplicate of an existing issue", with no id.
 - None of the other 85 rows calls itself a duplicate.
 - All 6 bad_priority rationales name the priority the bug was triaged with, not the stored one.
+- No rationale argues with its priority, so only the bad_priority rows disagree with it.
 
 The same seed gives the same sampled values: ids, areas, environments, which bugs are duplicated
 and which are corrupted. The LLM's text can differ from run to run.
@@ -98,8 +99,8 @@ second one, a reason for the mismatch; the LLM wrote the words:
 
 | | decided in code | the LLM's rationale |
 |---|---|---|
-| BUG-RSH0Z | low severity, P3 | "This is a frontend checkout display issue: the order total sometimes fails to refresh after the quantity changes. Moving to P3 is appropriate because the issue is intermittent, low severity, and can be worked around by refreshing the page." |
-| BUG-77NUD | low severity, P0, because "a key enterprise customer reported it" | "The report concerns the checkout experience in Chrome on web, so frontend is the best-fit component. Moving to P0 despite the reported low severity because a key enterprise customer raised it; …" |
+| BUG-RSH0Z | low severity, P3 | "The checkout UI accepts the discount code but fails to refresh the displayed order total, so this belongs to the frontend component. Moving to P3 is appropriate for a low-severity issue with a workaround of checking the final total before placing the order." |
+| BUG-77NUD | low severity, P0, because "a key enterprise customer reported it" | "The report describes a vague usability issue in the web checkout experience, so frontend is the best fit. Moving to P0 because a key enterprise customer reported it, making immediate investigation and resolution critical despite the reported low severity." |
 
 ### Typed LLM calls feeding each other
 
@@ -150,7 +151,7 @@ record does not say of what.
 
 ### Ids that give nothing away
 
-The way we generate, all duplicate bug rows are next to each other. We can shuffle, but then bugs are not in order, and duplicates might seemingly refer to bugs filed later. The solution was the hash the bug ids, so each id remains unique but they look like UUIDs.
+The way we generate, all duplicate bug rows are next to each other. We can shuffle, but then bugs are not in order, and duplicates might seemingly refer to bugs filed later. The solution was to hash the bug ids, so each id remains unique but they look like UUIDs.
 
 ```ts
 id: new UniqueIdGen({ prefix: "BUG-", length: 5 }),
